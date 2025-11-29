@@ -1,0 +1,5 @@
+{
+  "name": "ChordCraft",
+  "description": "A professional musician's tool for managing song sheets, transposing chords, and visualizing degree notation.",
+  "requestFramePermissions": []
+}
