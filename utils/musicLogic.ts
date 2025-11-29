@@ -54,6 +54,30 @@ export const transpose = (chord: string, semitones: number): string => {
 };
 
 /**
+ * Transposes the entire content of a song by finding chords in brackets.
+ * Preserves section headers like [Chorus].
+ */
+export const transposeContent = (content: string, semitones: number): string => {
+  if (semitones === 0) return content;
+  
+  return content.replace(/\[(.*?)\]/g, (match, inner) => {
+    // Check if it is a section header to avoid transposing "Chorus" to "Dhorus"
+    // We check against common section names or if the inner text doesn't look like a chord
+    if (/^(Intro|Verse|Chorus|Refrain|Bridge|Pont|Pre-Chorus|Outro|Solo|Instrumental|Couplet)/i.test(inner)) {
+       return match;
+    }
+
+    // Double check if it looks like a chord before transposing
+    if (!CHORD_REGEX.test(inner)) {
+        return match;
+    }
+
+    const transposed = transpose(inner, semitones);
+    return `[${transposed}]`;
+  });
+};
+
+/**
  * Converts a chord to its scale degree relative to a Key.
  * e.g., Key: C, Chord: Am -> 6m
  * Key: C, Chord: G -> 5
@@ -107,4 +131,20 @@ export const convertToDegree = (chord: string, key: string): string => {
   }
 
   return `${degreeRoot}${quality}${degreeBass}`;
+};
+
+/**
+ * Detects if a line is a section header (e.g. "[Chorus]", "[Verse 1]")
+ */
+export const getSectionType = (line: string): string | null => {
+  const trimmed = line.trim();
+  // Matches brackets containing common section names
+  const sectionRegex = /^\[(Intro|Verse|Chorus|Refrain|Bridge|Pont|Pre-Chorus|Outro|Solo|Instrumental|Couplet).*\]$/i;
+  const match = trimmed.match(sectionRegex);
+  
+  if (match) {
+    // Return the text inside brackets without brackets
+    return trimmed.replace('[', '').replace(']', '');
+  }
+  return null;
 };

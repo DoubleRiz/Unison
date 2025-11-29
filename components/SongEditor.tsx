@@ -1,58 +1,88 @@
 import React, { useState, useEffect } from 'react';
-import { Song } from '../types';
-import { Save, X, Globe, Lock } from 'lucide-react';
+import { Song, Group } from '../types';
+import { Save, X, Globe, Lock, Music2, Users } from 'lucide-react';
 
 interface SongEditorProps {
   initialSong?: Song | null;
+  groups: Group[];
   onSave: (song: Song) => void;
   onCancel: () => void;
 }
 
-const SongEditor: React.FC<SongEditorProps> = ({ initialSong, onSave, onCancel }) => {
+const KEYS = ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B'];
+
+const SongEditor: React.FC<SongEditorProps> = ({ initialSong, groups, onSave, onCancel }) => {
   const [title, setTitle] = useState('');
   const [artist, setArtist] = useState('');
-  const [bpm, setBpm] = useState<string>(''); // Géré en string pour permettre le champ vide
-  const [key, setKey] = useState('C');
+  const [bpm, setBpm] = useState<string>('');
+  
+  // Split Key into Root + Quality
+  const [keyRoot, setKeyRoot] = useState('C');
+  const [keyQuality, setKeyQuality] = useState('Major'); // 'Major' or 'Minor'
+
   const [content, setContent] = useState('');
   const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [audioUrl, setAudioUrl] = useState('');
   const [isPublic, setIsPublic] = useState(false);
+  const [sharedGroupId, setSharedGroupId] = useState<string>('');
 
   useEffect(() => {
     if (initialSong) {
       setTitle(initialSong.title);
       setArtist(initialSong.artist);
       setBpm(initialSong.bpm ? initialSong.bpm.toString() : '');
-      setKey(initialSong.key);
+      
+      // Parse Key (Simple parsing logic)
+      const isMinor = initialSong.key.endsWith('m');
+      const root = isMinor ? initialSong.key.slice(0, -1) : initialSong.key;
+      
+      setKeyRoot(KEYS.includes(root) ? root : 'C');
+      setKeyQuality(isMinor ? 'Minor' : 'Major');
+
       setContent(initialSong.content);
       setYoutubeUrl(initialSong.youtubeUrl || '');
+      setAudioUrl(initialSong.audioUrl || '');
       setIsPublic(initialSong.is_public);
+      setSharedGroupId(initialSong.shared_with_group_id || '');
     } else {
       // Reset for new song
       setTitle('');
       setArtist('');
       setBpm('120');
-      setKey('C');
-      setContent(`[C]      [G]
-Hello world, this is a song
-[Am]          [F]
-Using chords above the text`);
+      setKeyRoot('C');
+      setKeyQuality('Major');
+      setContent(`[Intro]
+[C]     [G]
+
+[Verse 1]
+[C]                [G]
+This is how you write a song
+[Am]             [F]
+With sections clearly marked`);
       setYoutubeUrl('');
+      setAudioUrl('');
       setIsPublic(false);
+      setSharedGroupId('');
     }
   }, [initialSong]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Reconstruct full key string
+    const fullKey = `${keyRoot}${keyQuality === 'Minor' ? 'm' : ''}`;
+
     onSave({
       id: initialSong ? initialSong.id : crypto.randomUUID(),
-      // user_id sera ajouté par le contexte d'auth plus tard
       title,
       artist,
       bpm: bpm === '' ? null : Number(bpm),
-      key,
+      key: fullKey,
       content,
       youtubeUrl,
-      is_public: isPublic
+      audioUrl,
+      is_public: isPublic,
+      shared_with_group_id: sharedGroupId === '' ? null : sharedGroupId
     });
   };
 
@@ -93,19 +123,30 @@ Using chords above the text`);
       </div>
 
       <div className="grid grid-cols-3 gap-4 mb-4">
-        <div>
-          <label className="block text-xs font-medium text-slate-400 mb-1">Key (e.g. Am, C#)</label>
-          <input
-            required
-            type="text"
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 focus:outline-none focus:border-cyan-500 text-white"
-            placeholder="C"
-          />
+        {/* Key Selector Split */}
+        <div className="col-span-1">
+          <label className="block text-xs font-medium text-slate-400 mb-1">Key</label>
+          <div className="flex gap-1">
+            <select 
+              value={keyRoot}
+              onChange={(e) => setKeyRoot(e.target.value)}
+              className="w-2/3 bg-slate-950 border border-slate-800 rounded-l-lg px-2 py-2 text-white focus:outline-none focus:border-cyan-500 text-sm appearance-none"
+            >
+              {KEYS.map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+            <select
+              value={keyQuality}
+              onChange={(e) => setKeyQuality(e.target.value)}
+              className="w-1/3 bg-slate-950 border border-slate-800 border-l-0 rounded-r-lg px-1 py-2 text-slate-300 focus:outline-none focus:border-cyan-500 text-sm appearance-none"
+            >
+              <option value="Major">Maj</option>
+              <option value="Minor">min</option>
+            </select>
+          </div>
         </div>
+
         <div>
-          <label className="block text-xs font-medium text-slate-400 mb-1">BPM (Optional)</label>
+          <label className="block text-xs font-medium text-slate-400 mb-1">BPM</label>
           <input
             type="number"
             value={bpm}
@@ -114,41 +155,83 @@ Using chords above the text`);
             placeholder="-"
           />
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
          <div>
           <label className="block text-xs font-medium text-slate-400 mb-1">YouTube URL</label>
           <input
             type="text"
             value={youtubeUrl}
             onChange={(e) => setYoutubeUrl(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 focus:outline-none focus:border-cyan-500 text-white"
-            placeholder="https://..."
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 focus:outline-none focus:border-cyan-500 text-white placeholder:text-slate-700"
+            placeholder="https://youtube.com/..."
           />
+        </div>
+         <div>
+          <label className="block text-xs font-medium text-slate-400 mb-1">Audio URL (MP3/WAV)</label>
+          <div className="relative">
+            <input
+              type="text"
+              value={audioUrl}
+              onChange={(e) => setAudioUrl(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:border-cyan-500 text-white placeholder:text-slate-700"
+              placeholder="https://example.com/song.mp3"
+            />
+            <Music2 className="absolute left-3 top-2.5 text-slate-600" size={14} />
+          </div>
         </div>
       </div>
 
-      {/* Visibility Toggle */}
-      <div className="mb-6 p-3 bg-slate-950/50 border border-slate-800 rounded-lg flex items-center justify-between cursor-pointer hover:border-slate-700 transition-colors" onClick={() => setIsPublic(!isPublic)}>
-        <div className="flex items-center gap-3">
-          <div className={`p-2 rounded-lg ${isPublic ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-400'}`}>
-            {isPublic ? <Globe size={20} /> : <Lock size={20} />}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        {/* Visibility Toggle */}
+        <div className="p-3 bg-slate-950/50 border border-slate-800 rounded-lg flex items-center justify-between cursor-pointer hover:border-slate-700 transition-colors" onClick={() => setIsPublic(!isPublic)}>
+          <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-lg ${isPublic ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-400'}`}>
+              {isPublic ? <Globe size={20} /> : <Lock size={20} />}
+            </div>
+            <div>
+              <div className={`text-sm font-medium ${isPublic ? 'text-cyan-400' : 'text-slate-300'}`}>
+                {isPublic ? 'Public Song' : 'Private Song'}
+              </div>
+              <div className="text-xs text-slate-500">
+                {isPublic ? 'Visible to everyone.' : 'Only visible to you/group.'}
+              </div>
+            </div>
           </div>
-          <div>
-            <div className={`text-sm font-medium ${isPublic ? 'text-cyan-400' : 'text-slate-300'}`}>
-              {isPublic ? 'Public Song' : 'Private Song'}
-            </div>
-            <div className="text-xs text-slate-500">
-              {isPublic ? 'Visible to everyone in the community.' : 'Only visible to you.'}
-            </div>
+          <div className={`w-12 h-6 rounded-full relative transition-colors ${isPublic ? 'bg-cyan-600' : 'bg-slate-700'}`}>
+            <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all duration-200 ${isPublic ? 'left-7' : 'left-1'}`}></div>
           </div>
         </div>
-        <div className={`w-12 h-6 rounded-full relative transition-colors ${isPublic ? 'bg-cyan-600' : 'bg-slate-700'}`}>
-          <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all duration-200 ${isPublic ? 'left-7' : 'left-1'}`}></div>
-        </div>
+
+        {/* Group Permission Toggle */}
+        {groups.length > 0 && (
+          <div className="p-3 bg-slate-950/50 border border-slate-800 rounded-lg flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-purple-500/20 text-purple-400">
+              <Users size={20} />
+            </div>
+            <div className="flex-1">
+              <div className="text-sm font-medium text-purple-300 mb-1">
+                Allow Group Editing
+              </div>
+              <select 
+                value={sharedGroupId}
+                onChange={(e) => setSharedGroupId(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded text-xs text-white py-1 px-2 focus:outline-none"
+              >
+                <option value="">No Group (Only Me)</option>
+                {groups.map(g => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mb-6">
         <label className="block text-xs font-medium text-slate-400 mb-1">
-          Content (Use [Chord] notation)
+          Content (Use [Chord] notation, use [Chorus] for sections)
         </label>
         <div className="relative">
           <textarea
@@ -156,8 +239,12 @@ Using chords above the text`);
             value={content}
             onChange={(e) => setContent(e.target.value)}
             className="w-full h-96 bg-slate-950 border border-slate-800 rounded-lg px-4 py-4 font-mono text-sm focus:outline-none focus:border-cyan-500 text-slate-300 leading-relaxed resize-none"
-            placeholder={`[C]      [G]
-Hello world...`}
+            placeholder={`[Intro]
+[C]      [G]
+
+[Verse 1]
+[C]                 [G]
+This is how you write a song...`}
           />
           <div className="absolute top-2 right-2 opacity-50 text-[10px] text-slate-500 bg-slate-900/80 px-2 py-1 rounded pointer-events-none border border-slate-800">
             Use monospace spaces to align

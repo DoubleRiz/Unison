@@ -1,13 +1,49 @@
 export interface Song {
   id: string;
-  user_id?: string; // Optionnel pour l'instant (mock), obligatoire avec la BDD
+  user_id?: string;
   title: string;
   artist: string;
-  bpm: number | null; // Devenu optionnel (nullable)
-  key: string; // Correspondra à original_key en BDD
+  bpm: number | null;
+  key: string; 
   content: string; 
   youtubeUrl?: string;
-  is_public: boolean; // Nouveau champ pour la visibilité
+  audioUrl?: string;
+  is_public: boolean;
+  is_favorite?: boolean;
+  shared_with_group_id?: string | null;
+}
+
+export interface Setlist {
+  id: string;
+  user_id: string;
+  group_id?: string | null;
+  title: string;
+  created_at: string;
+  songs?: Song[]; // Optional, used for UI display only
+}
+
+export interface SetlistSong {
+  id: string;
+  setlist_id: string;
+  song_id: string;
+  position: number;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface GroupMember {
+  id: string;
+  group_id: string;
+  user_id: string;
+  status: 'pending' | 'accepted';
+  role: 'member' | 'admin';
+  group?: Group; // Joined data
+  user?: { username: string; avatar_url: string }; // Joined data
 }
 
 export enum NotationMode {
