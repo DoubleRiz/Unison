@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Song, Group } from '../types';
-import { Save, X, Globe, Lock, Music2, Users } from 'lucide-react';
+import { Song, Group, GENRES } from '../types';
+import { Save, X, Globe, Lock, Music2, Users, Tag, Plus } from 'lucide-react';
 
 interface SongEditorProps {
   initialSong?: Song | null;
   groups: Group[];
+  existingTags: string[]; // List of unique tags from all songs
   onSave: (song: Song) => void;
   onCancel: () => void;
 }
 
 const KEYS = ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B'];
 
-const SongEditor: React.FC<SongEditorProps> = ({ initialSong, groups, onSave, onCancel }) => {
+const SongEditor: React.FC<SongEditorProps> = ({ initialSong, groups, existingTags, onSave, onCancel }) => {
   const [title, setTitle] = useState('');
   const [artist, setArtist] = useState('');
   const [bpm, setBpm] = useState<string>('');
@@ -25,6 +26,11 @@ const SongEditor: React.FC<SongEditorProps> = ({ initialSong, groups, onSave, on
   const [audioUrl, setAudioUrl] = useState('');
   const [isPublic, setIsPublic] = useState(false);
   const [sharedGroupId, setSharedGroupId] = useState<string>('');
+  
+  // Genres & Tags
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
 
   useEffect(() => {
     if (initialSong) {
@@ -44,6 +50,8 @@ const SongEditor: React.FC<SongEditorProps> = ({ initialSong, groups, onSave, on
       setAudioUrl(initialSong.audioUrl || '');
       setIsPublic(initialSong.is_public);
       setSharedGroupId(initialSong.shared_with_group_id || '');
+      setSelectedGenres(initialSong.genres || []);
+      setTags(initialSong.tags || []);
     } else {
       // Reset for new song
       setTitle('');
@@ -63,8 +71,37 @@ With sections clearly marked`);
       setAudioUrl('');
       setIsPublic(false);
       setSharedGroupId('');
+      setSelectedGenres([]);
+      setTags([]);
     }
   }, [initialSong]);
+
+  const toggleGenre = (genre: string) => {
+    if (selectedGenres.includes(genre)) {
+      setSelectedGenres(selectedGenres.filter(g => g !== genre));
+    } else {
+      setSelectedGenres([...selectedGenres, genre]);
+    }
+  };
+
+  const handleAddTag = () => {
+    const newTag = tagInput.trim();
+    if (newTag && !tags.includes(newTag)) {
+      setTags([...tags, newTag]);
+    }
+    setTagInput('');
+  };
+
+  const handleRemoveTag = (tagToRemove: string) => {
+    setTags(tags.filter(t => t !== tagToRemove));
+  };
+
+  const handleTagKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddTag();
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,7 +119,9 @@ With sections clearly marked`);
       youtubeUrl,
       audioUrl,
       is_public: isPublic,
-      shared_with_group_id: sharedGroupId === '' ? null : sharedGroupId
+      shared_with_group_id: sharedGroupId === '' ? null : sharedGroupId,
+      genres: selectedGenres,
+      tags: tags
     });
   };
 
@@ -180,6 +219,56 @@ With sections clearly marked`);
             />
             <Music2 className="absolute left-3 top-2.5 text-slate-600" size={14} />
           </div>
+        </div>
+      </div>
+
+      {/* Genres */}
+      <div className="mb-4">
+        <label className="block text-xs font-medium text-slate-400 mb-2">Genres</label>
+        <div className="flex flex-wrap gap-2">
+          {GENRES.map(genre => (
+            <button
+              key={genre}
+              type="button"
+              onClick={() => toggleGenre(genre)}
+              className={`px-3 py-1 text-xs rounded-full border transition-all ${
+                selectedGenres.includes(genre)
+                  ? 'bg-cyan-600 border-cyan-500 text-white'
+                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-600'
+              }`}
+            >
+              {genre}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tags */}
+      <div className="mb-6">
+        <label className="block text-xs font-medium text-slate-400 mb-2">Tags</label>
+        <div className="bg-slate-950 border border-slate-800 rounded-lg p-2 flex flex-wrap gap-2 min-h-[46px] items-center">
+          {tags.map(tag => (
+            <span key={tag} className="bg-purple-900/30 text-purple-300 border border-purple-800/50 px-2 py-1 rounded text-xs flex items-center gap-1">
+              #{tag}
+              <button type="button" onClick={() => handleRemoveTag(tag)} className="hover:text-white">
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+          <input
+            type="text"
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            onKeyDown={handleTagKeyDown}
+            className="bg-transparent text-sm text-white focus:outline-none flex-1 min-w-[120px]"
+            placeholder="Add tag & press Enter..."
+            list="tag-suggestions"
+          />
+          <datalist id="tag-suggestions">
+            {existingTags.map(tag => (
+              <option key={tag} value={tag} />
+            ))}
+          </datalist>
         </div>
       </div>
 

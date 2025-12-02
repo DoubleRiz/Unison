@@ -1,8 +1,9 @@
-import React, { useMemo, useState, useEffect } from 'react';
+
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Song, NotationMode } from '../types';
 import { transpose, convertToDegree, getSectionType } from '../utils/musicLogic';
-import { Music2, Heart } from 'lucide-react';
-import { supabase } from '../lib/supabaseClient';
+import { Music2, Heart, Trash2, AlertTriangle, Edit3, ZoomIn, ZoomOut, Mic, MicOff, Play, Pause, GitBranch, Shield } from 'lucide-react';
+import CommentsSection from './CommentsSection';
 
 interface SongSheetProps {
   song: Song;
@@ -10,23 +11,90 @@ interface SongSheetProps {
   notationMode: NotationMode;
   onToggleFavorite?: (isFav: boolean) => void;
   className?: string;
+  session?: any; 
+  isAdmin?: boolean;
+  onOpenAuth?: () => void;
+  onEdit?: () => void;
+  onDelete?: (id: string) => void;
 }
 
-const SongSheet: React.FC<SongSheetProps> = ({ song, transposeSemitones, notationMode, onToggleFavorite, className = '' }) => {
+const SongSheet: React.FC<SongSheetProps> = ({ 
+  song, 
+  transposeSemitones, 
+  notationMode, 
+  onToggleFavorite, 
+  className = '', 
+  session,
+  isAdmin = false,
+  onOpenAuth,
+  onEdit,
+  onDelete
+}) => {
   const [isFavorite, setIsFavorite] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  // View Settings
+  const [fontSize, setFontSize] = useState(1.125); // Default 1.125rem (text-lg)
+  const [showChords, setShowChords] = useState(true);
+
+  // Auto Scroll State
+  const [isScrolling, setIsScrolling] = useState(false);
+  const [scrollSpeed, setScrollSpeed] = useState(1); // 1 to 10
+  const scrollIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
     // Sync local state with prop when song changes
     setIsFavorite(!!song.is_favorite);
+    setIsScrolling(false);
   }, [song]);
 
+  // Handle Auto Scroll
+  useEffect(() => {
+    if (isScrolling) {
+      scrollIntervalRef.current = window.setInterval(() => {
+        // Try to find the scrollable parent (Dashboard main area OR Setlist modal)
+        // We look for the closest element with overflow-y-auto
+        const scrollableParent = containerRef.current?.closest('.overflow-y-auto');
+        
+        if (scrollableParent) {
+          // Connected Mode / Dashboard Scroll
+          scrollableParent.scrollBy(0, scrollSpeed * 0.5);
+          
+          // Stop if reached bottom (with small buffer)
+          if (scrollableParent.scrollTop + scrollableParent.clientHeight >= scrollableParent.scrollHeight - 5) {
+             setIsScrolling(false);
+          }
+        } else {
+          // Guest Mode / Window Scroll
+          window.scrollBy(0, scrollSpeed * 0.5);
+          
+          // Stop if reached bottom
+          if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 5) {
+             setIsScrolling(false);
+          }
+        }
+      }, 30); // ~30fps
+    } else {
+      if (scrollIntervalRef.current) clearInterval(scrollIntervalRef.current);
+    }
+
+    return () => {
+      if (scrollIntervalRef.current) clearInterval(scrollIntervalRef.current);
+    };
+  }, [isScrolling, scrollSpeed]);
+
   const toggleFavorite = async () => {
+    if (!session || !onToggleFavorite) return;
     const newState = !isFavorite;
     setIsFavorite(newState);
     
     // Optimistic update locally, call parent to sync DB
-    if (onToggleFavorite) onToggleFavorite(newState);
+    onToggleFavorite(newState);
   };
+
+  const isOwner = session && session.user.id === song.user_id;
+  const canEdit = isOwner || isAdmin;
   
   // Parse content into structure
   const parsedLines = useMemo(() => {
@@ -99,34 +167,203 @@ const SongSheet: React.FC<SongSheetProps> = ({ song, transposeSemitones, notatio
 
   const youtubeId = song.youtubeUrl ? getYoutubeId(song.youtubeUrl) : null;
 
+  const adjustFontSize = (delta: number) => {
+    setFontSize(prev => {
+      const newSize = prev + delta;
+      return Math.max(0.7, Math.min(newSize, 4.0));
+    });
+  };
+
   return (
-    <div className={`max-w-4xl mx-auto pb-20 ${className}`}>
+    <div ref={containerRef} className={`max-w-4xl mx-auto pb-32 ${className}`}>
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-sm w-full shadow-2xl">
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="w-12 h-12 bg-red-900/20 text-red-500 rounded-full flex items-center justify-center mb-4">
+                <AlertTriangle size={24} />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">Delete Song?</h3>
+              <p className="text-slate-400 text-sm">
+                Are you sure you want to delete <span className="text-white font-medium">"{song.title}"</span>? This action cannot be undone.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setShowDeleteConfirm(false)}
+                className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => {
+                  if (onDelete) onDelete(song.id);
+                  setShowDeleteConfirm(false);
+                }}
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auto Scroll Floating Controls */}
+      <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2">
+        {isScrolling && (
+            <div className="bg-slate-900/90 backdrop-blur border border-slate-700 p-3 rounded-xl shadow-2xl mb-2 flex flex-col gap-2 w-16 items-center">
+               <span className="text-[10px] font-bold text-slate-400 uppercase">Speed</span>
+               <div className="h-32 bg-slate-800 rounded-full w-2 relative">
+                  <div 
+                    className="absolute bottom-0 w-full bg-cyan-500 rounded-full"
+                    style={{ height: `${(scrollSpeed / 5) * 100}%` }}
+                  ></div>
+                  <input 
+                    type="range" 
+                    min="1" 
+                    max="5" 
+                    step="0.5"
+                    value={scrollSpeed}
+                    onChange={(e) => setScrollSpeed(Number(e.target.value))}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    style={{ writingMode: 'vertical-lr', direction: 'rtl' }} // Hack for vertical range
+                  />
+               </div>
+               <span className="font-mono font-bold text-cyan-400">{scrollSpeed}x</span>
+            </div>
+        )}
+        <button 
+          onClick={() => setIsScrolling(!isScrolling)}
+          className={`h-14 w-14 rounded-full shadow-lg flex items-center justify-center transition-all ${isScrolling ? 'bg-cyan-500 text-white animate-pulse' : 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700'}`}
+          title={isScrolling ? "Stop Scrolling" : "Auto Scroll"}
+        >
+           {isScrolling ? <Pause size={24} /> : <Play size={24} />}
+        </button>
+      </div>
+
       {/* Header */}
-      <div className="mb-8 border-b border-slate-800 pb-6 flex justify-between items-start">
-        <div>
-          <h1 className="text-4xl font-bold text-white mb-2">{song.title}</h1>
-          <div className="flex items-center gap-4 text-slate-400 text-sm">
-            <span className="px-2 py-1 bg-slate-800 rounded text-cyan-400 font-medium">
-              {notationMode === NotationMode.LETTERS 
-                ? transpose(song.key, transposeSemitones) 
-                : '1'}
-            </span>
-            <span>{song.artist}</span>
-            {song.bpm && (
-              <>
-                <span>•</span>
-                <span>{song.bpm} BPM</span>
-              </>
+      <div className="mb-4 border-b border-slate-800 pb-6">
+        <div className="flex justify-between items-start mb-4">
+          <div>
+            <h1 className="text-4xl font-bold text-white mb-2">{song.title}</h1>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-4 text-slate-400 text-sm">
+                <span className="px-2 py-1 bg-slate-800 rounded text-cyan-400 font-medium">
+                  {notationMode === NotationMode.LETTERS 
+                    ? transpose(song.key, transposeSemitones) 
+                    : '1'}
+                </span>
+                <span>{song.artist}</span>
+                {song.bpm && (
+                  <>
+                    <span>•</span>
+                    <span>{song.bpm} BPM</span>
+                  </>
+                )}
+              </div>
+              
+              {/* Fork Source Badge */}
+              {song.forked_from && (
+                <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-1">
+                   <GitBranch size={12} />
+                   <span>Based on an arrangement</span>
+                </div>
+              )}
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            
+            {canEdit && onDelete && (
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="p-3 rounded-full bg-slate-800 text-slate-400 hover:text-red-400 hover:bg-red-900/20 transition-all border border-slate-700 relative group"
+                title={isAdmin && !isOwner ? "Delete (Admin)" : "Delete Song"}
+              >
+                <Trash2 size={20} />
+                {isAdmin && !isOwner && <Shield size={10} className="absolute top-0 right-0 text-yellow-500 fill-yellow-500" />}
+              </button>
+            )}
+            
+            {/* Show Edit button if owner, admin, or group permission */}
+            {onEdit && (canEdit || song.shared_with_group_id) && (
+              <button
+                onClick={onEdit}
+                className="p-3 rounded-full bg-slate-800 text-slate-400 hover:text-cyan-400 hover:bg-cyan-900/20 transition-all border border-slate-700 relative"
+                title={isAdmin && !isOwner ? "Edit (Admin)" : "Edit Song"}
+              >
+                <Edit3 size={20} />
+                {isAdmin && !isOwner && <Shield size={10} className="absolute top-0 right-0 text-yellow-500 fill-yellow-500" />}
+              </button>
+            )}
+            
+            {session && (
+              <button 
+                onClick={toggleFavorite}
+                className={`p-3 rounded-full transition-all border border-slate-700 ${isFavorite ? 'bg-pink-500/20 text-pink-500 border-pink-500/30' : 'bg-slate-800 text-slate-400 hover:text-pink-400'}`}
+                title="Toggle Favorite"
+              >
+                <Heart size={20} fill={isFavorite ? "currentColor" : "none"} />
+              </button>
             )}
           </div>
         </div>
-        
-        <button 
-          onClick={toggleFavorite}
-          className={`p-3 rounded-full transition-all ${isFavorite ? 'bg-pink-500/20 text-pink-500' : 'bg-slate-800 text-slate-400 hover:text-pink-400'}`}
-        >
-          <Heart size={24} fill={isFavorite ? "currentColor" : "none"} />
-        </button>
+
+        {/* Tags & Genres */}
+        {(song.genres?.length || 0) + (song.tags?.length || 0) > 0 && (
+          <div className="flex flex-wrap gap-2 mb-4">
+            {song.genres?.map(genre => (
+              <span key={genre} className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-xs border border-slate-700">
+                {genre}
+              </span>
+            ))}
+            {song.tags?.map(tag => (
+              <span key={tag} className="px-2 py-0.5 rounded-full bg-purple-900/30 text-purple-300 text-xs border border-purple-800/50">
+                #{tag}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* View Controls Toolbar */}
+        <div className="flex items-center justify-between bg-slate-900/50 p-2 rounded-lg border border-slate-800/50">
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => adjustFontSize(-0.1)}
+              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
+              title="Decrease Font Size"
+            >
+              <ZoomOut size={18} />
+            </button>
+            <span className="text-xs text-slate-500 font-mono w-12 text-center">
+              {Math.round(fontSize * 16)}px
+            </span>
+            <button 
+              onClick={() => adjustFontSize(0.1)}
+              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
+              title="Increase Font Size"
+            >
+              <ZoomIn size={18} />
+            </button>
+            
+            <div className="w-px h-6 bg-slate-800 mx-2"></div>
+            
+            <button
+              onClick={() => setShowChords(!showChords)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                !showChords 
+                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20' 
+                  : 'bg-slate-800 text-slate-400 hover:text-white'
+              }`}
+              title={showChords ? "Hide Chords (Singer Mode)" : "Show Chords"}
+            >
+              {!showChords ? <Mic size={14} /> : <MicOff size={14} />}
+              {showChords ? 'Hide Chords' : 'Lyrics Only'}
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Media Player Section */}
@@ -161,7 +398,10 @@ const SongSheet: React.FC<SongSheetProps> = ({ song, transposeSemitones, notatio
       </div>
 
       {/* Sheet Music */}
-      <div className="font-mono text-lg select-text">
+      <div 
+        className="font-mono select-text min-h-[400px] transition-all duration-200"
+        style={{ fontSize: `${fontSize}rem` }}
+      >
         {parsedLines.map((lineObj, lineIdx) => {
           // Case 1: Section Header
           if (lineObj.isSection) {
@@ -181,10 +421,15 @@ const SongSheet: React.FC<SongSheetProps> = ({ song, transposeSemitones, notatio
           
           const isTightGroup = isCurrentLineChords && nextLine && nextLine.length > 0;
           
+          // LYRICS ONLY MODE LOGIC
+          if (!showChords && isCurrentLineChords) {
+            return null; // Skip pure chord lines completely
+          }
+
           return (
             <div 
               key={lineIdx} 
-              className={`flex flex-wrap items-end ${isTightGroup ? 'mb-0' : 'mb-6'} min-h-[1.5em]`}
+              className={`flex flex-wrap items-end ${isTightGroup && showChords ? 'mb-0' : 'mb-2'} min-h-[1.2em]`}
             >
               {/* Empty line handler */}
               {line.length === 0 || (line.length === 1 && !line[0].chord && !line[0].lyrics) ? (
@@ -193,10 +438,11 @@ const SongSheet: React.FC<SongSheetProps> = ({ song, transposeSemitones, notatio
                 line.map((segment, segIdx) => {
                   const chordString = processChord(segment.chord);
                   
+                  // Scenario: Pure Chord Line (renders horizontally)
                   if (isCurrentLineChords) {
                     return (
                       <div key={segIdx} className="flex">
-                        {chordString && (
+                        {chordString && showChords && (
                           <span className={`font-bold select-none mr-0.5 ${notationMode === NotationMode.DEGREES ? '' : 'text-cyan-400'}`}>
                             {renderChordDisplay(chordString)}
                           </span>
@@ -208,10 +454,11 @@ const SongSheet: React.FC<SongSheetProps> = ({ song, transposeSemitones, notatio
                     );
                   }
 
+                  // Scenario: Mixed/Lyric Line (Vertical Stacking)
                   return (
                     <div key={segIdx} className="flex flex-col group relative">
-                      {chordString && (
-                        <div className={`font-bold text-base leading-none select-none mb-1 ${notationMode === NotationMode.DEGREES ? '' : 'text-cyan-400'}`}>
+                      {chordString && showChords && (
+                        <div className={`font-bold text-[0.9em] leading-none select-none mb-0.5 ${notationMode === NotationMode.DEGREES ? '' : 'text-cyan-400'}`}>
                           {renderChordDisplay(chordString)}
                         </div>
                       )}
@@ -227,6 +474,13 @@ const SongSheet: React.FC<SongSheetProps> = ({ song, transposeSemitones, notatio
           );
         })}
       </div>
+
+      {/* Social / Comments Section */}
+      <CommentsSection 
+        songId={song.id} 
+        session={session} 
+        onOpenAuth={onOpenAuth || (() => {})} 
+      />
     </div>
   );
 };

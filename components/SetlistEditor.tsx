@@ -18,7 +18,9 @@ import {
   Minimize2,
   Users,
   User,
-  AlertTriangle
+  AlertTriangle,
+  Hash,
+  Type
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import SongSheet from './SongSheet';
@@ -49,6 +51,9 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   const [loading, setLoading] = useState(true);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState('');
+  
+  // Notation Mode (New Feature)
+  const [notationMode, setNotationMode] = useState<NotationMode>(NotationMode.LETTERS);
 
   // Delete Modal State
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -378,6 +383,17 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
           
           <div className="flex items-center gap-4">
             <button 
+                onClick={() => setNotationMode(m => m === NotationMode.LETTERS ? NotationMode.DEGREES : NotationMode.LETTERS)}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 text-sm font-medium text-slate-300 hover:text-white transition-colors"
+                title="Toggle Notation"
+            >
+                {notationMode === NotationMode.LETTERS ? <Hash size={18} /> : <Type size={18} />}
+                <span className="hidden sm:inline">{notationMode === NotationMode.LETTERS ? 'Letters' : 'Degrees'}</span>
+            </button>
+
+            <div className="h-8 w-px bg-slate-800 mx-2"></div>
+
+            <button 
               disabled={performanceIndex === 0}
               onClick={() => setPerformanceIndex(p => p - 1)}
               className="p-2 rounded-full bg-slate-800 text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-cyan-600 transition-colors"
@@ -401,7 +417,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
              <SongSheet 
                song={currentItem.song} 
                transposeSemitones={currentItem.transpose} 
-               notationMode={NotationMode.LETTERS}
+               notationMode={notationMode} // PASSING THE MODE HERE
              />
            </div>
         </div>
@@ -527,10 +543,6 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     );
   }
 
-  // ... (Rest of the component: Edit View and PDF Modal remain same as previous version but imported below for completeness of the file change if needed, 
-  // but for brevity in this response I will assume the structure is preserved and just the top level logic was key. 
-  // Wait, I must provide full content. I will paste the Edit View logic below)
-
   return (
     <div className="max-w-6xl mx-auto h-[calc(100vh-140px)] flex flex-col relative">
       {/* PDF Modal */}
@@ -589,10 +601,27 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
                 </button>
               </div>
             )}
+            
+            {/* Show group badge if applicable */}
+            {currentSetlist.group_id && (
+              <span className="px-2 py-0.5 rounded-full bg-purple-900/30 text-purple-400 text-xs border border-purple-800/50 flex items-center gap-1">
+                <Users size={12} />
+                Group Setlist
+              </span>
+            )}
           </div>
         </div>
         
         <div className="flex gap-3">
+            {/* Notation Toggle in Main Editor View too? Why not, useful for Perform preview */}
+            <button 
+                onClick={() => setNotationMode(m => m === NotationMode.LETTERS ? NotationMode.DEGREES : NotationMode.LETTERS)}
+                className="flex items-center gap-2 px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm font-medium text-slate-300 hover:text-white transition-colors"
+            >
+                {notationMode === NotationMode.LETTERS ? <Hash size={18} /> : <Type size={18} />}
+                <span className="hidden sm:inline">{notationMode === NotationMode.LETTERS ? 'Letters' : 'Degrees'}</span>
+            </button>
+
           <button 
             onClick={startPerformance}
             disabled={setlistItems.length === 0}
@@ -725,7 +754,13 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   );
 };
 
-const SetlistCard = ({ list, onDelete, onSelect }: { list: Setlist, onDelete: (id: string, e: React.MouseEvent) => void, onSelect: (l: Setlist) => void }) => (
+interface SetlistCardProps {
+  list: Setlist;
+  onDelete: (id: string, e: React.MouseEvent) => void;
+  onSelect: (l: Setlist) => void;
+}
+
+const SetlistCard: React.FC<SetlistCardProps> = ({ list, onDelete, onSelect }) => (
   <div 
     onClick={() => onSelect(list)}
     className="bg-slate-900 border border-slate-800 rounded-xl p-6 cursor-pointer hover:border-cyan-500/50 transition-all group relative"

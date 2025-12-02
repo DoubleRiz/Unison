@@ -1,3 +1,4 @@
+
 export interface Song {
   id: string;
   user_id?: string;
@@ -11,6 +12,21 @@ export interface Song {
   is_public: boolean;
   is_favorite?: boolean;
   shared_with_group_id?: string | null;
+  genres?: string[];
+  tags?: string[];
+  forked_from?: string | null;
+}
+
+export interface Comment {
+  id: string;
+  song_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  user?: {
+    username: string;
+    avatar_url: string;
+  };
 }
 
 export interface Setlist {
@@ -59,3 +75,5 @@ export interface Segment {
 export interface Line {
   segments: Segment[];
 }
+
+export const GENRES = ['Rock', 'Blues', 'Country', 'Pop', 'Worship', 'Metal', 'Rap', 'Rn\'B', 'Soul', 'Jazz','Gospel'];

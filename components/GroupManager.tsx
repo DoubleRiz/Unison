@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Group, GroupMember } from '../types';
-import { Users, Plus, UserPlus, Check, X, Shield, Loader2, AlertCircle } from 'lucide-react';
+import { Users, Plus, UserPlus, Check, X, Shield, Loader2, AlertCircle, Edit2, Save, Trash2, LogOut } from 'lucide-react';
 
 interface GroupManagerProps {
   user: any;
@@ -18,6 +18,10 @@ const GroupManager: React.FC<GroupManagerProps> = ({ user, onClose }) => {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
   
+  // Edit Mode State
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editNameValue, setEditNameValue] = useState('');
+
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [message, setMessage] = useState<{type: 'success'|'error', text: string} | null>(null);
@@ -30,6 +34,8 @@ const GroupManager: React.FC<GroupManagerProps> = ({ user, onClose }) => {
   useEffect(() => {
     if (selectedGroup) {
       fetchGroupMembers(selectedGroup.id);
+      setEditNameValue(selectedGroup.name);
+      setIsEditingName(false);
     }
   }, [selectedGroup]);
 
@@ -38,7 +44,6 @@ const GroupManager: React.FC<GroupManagerProps> = ({ user, onClose }) => {
     setFetchError(null);
     try {
       // 1. Get my memberships to find my groups
-      // Note: We use 'groups(*)' without alias to avoid potential keyword conflicts
       const { data: myMemberships, error: memError } = await supabase
         .from('group_members')
         .select('*, groups(*)') 
@@ -53,7 +58,7 @@ const GroupManager: React.FC<GroupManagerProps> = ({ user, onClose }) => {
       setInvitations(pending);
       
       // Map 'groups' property from the join
-      const myGroups = accepted.map((m: any) => m.groups);
+      const myGroups = accepted.map((m: any) => m.groups).filter(Boolean); // Filter nulls just in case
       setGroups(myGroups);
 
     } catch (error: any) {
@@ -106,8 +111,6 @@ const GroupManager: React.FC<GroupManagerProps> = ({ user, onClose }) => {
       setNewGroupName('');
       fetchData();
       setMessage({ type: 'success', text: 'Group created successfully!' });
-      
-      // Clear message after 3 seconds
       setTimeout(() => setMessage(null), 3000);
     } catch (error: any) {
       setMessage({ type: 'error', text: error.message });
@@ -181,6 +184,68 @@ const GroupManager: React.FC<GroupManagerProps> = ({ user, onClose }) => {
     }
   };
 
+  const updateGroupName = async () => {
+    if (!selectedGroup || !editNameValue.trim()) return;
+    setActionLoading(true);
+    try {
+      const { error } = await supabase
+        .from('groups')
+        .update({ name: editNameValue })
+        .eq('id', selectedGroup.id);
+
+      if (error) throw error;
+
+      // Update local state
+      setSelectedGroup({ ...selectedGroup, name: editNameValue });
+      setGroups(groups.map(g => g.id === selectedGroup.id ? { ...g, name: editNameValue } : g));
+      setIsEditingName(false);
+      setMessage({ type: 'success', text: 'Group renamed.' });
+      setTimeout(() => setMessage(null), 3000);
+    } catch (error: any) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const removeMember = async (memberId: string, memberName: string) => {
+    if (!confirm(`Are you sure you want to remove ${memberName} from the group?`)) return;
+    
+    setActionLoading(true);
+    try {
+      const { error } = await supabase.from('group_members').delete().eq('id', memberId);
+      if (error) throw error;
+      
+      // Update UI
+      setGroupMembers(groupMembers.filter(m => m.id !== memberId));
+      setMessage({ type: 'success', text: `${memberName} removed.` });
+      setTimeout(() => setMessage(null), 3000);
+    } catch (error: any) {
+       setMessage({ type: 'error', text: error.message });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const leaveGroup = async (memberId: string) => {
+    if (!confirm("Are you sure you want to leave this group?")) return;
+
+    setActionLoading(true);
+    try {
+      const { error } = await supabase.from('group_members').delete().eq('id', memberId);
+      if (error) throw error;
+
+      // Reset selection and refresh list
+      setSelectedGroup(null);
+      fetchData();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: error.message });
+      setActionLoading(false);
+    }
+  };
+
+  const isCreator = selectedGroup && selectedGroup.created_by === user.id;
+
   return (
     <div className="max-w-4xl mx-auto pb-20">
       <div className="mb-8 border-b border-slate-800 pb-6 flex justify-between items-center">
@@ -226,7 +291,6 @@ const GroupManager: React.FC<GroupManagerProps> = ({ user, onClose }) => {
                 {actionLoading ? <Loader2 size={18} className="animate-spin"/> : <Plus size={18} />}
               </button>
             </form>
-            {/* Show message for Create Group specifically if no group selected or generic */}
             {!selectedGroup && message && (
               <div className={`text-xs p-2 rounded ${message.type === 'error' ? 'bg-red-900/20 text-red-400' : 'bg-green-900/20 text-green-400'}`}>
                 {message.text}
@@ -275,7 +339,7 @@ const GroupManager: React.FC<GroupManagerProps> = ({ user, onClose }) => {
                   key={group.id} 
                   onClick={() => {
                     setSelectedGroup(group);
-                    setMessage(null); // Clear previous messages
+                    setMessage(null);
                   }}
                   className={`p-4 cursor-pointer hover:bg-slate-800 transition-colors ${selectedGroup?.id === group.id ? 'bg-slate-800 border-l-2 border-cyan-500' : ''}`}
                 >
@@ -293,9 +357,35 @@ const GroupManager: React.FC<GroupManagerProps> = ({ user, onClose }) => {
         <div className="md:col-span-2">
           {selectedGroup ? (
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 min-h-[400px]">
+              {/* Group Header */}
               <div className="flex justify-between items-start mb-6">
-                <div>
-                  <h2 className="text-2xl font-bold text-white">{selectedGroup.name}</h2>
+                <div className="flex-1">
+                  {isCreator && isEditingName ? (
+                    <div className="flex items-center gap-2 mb-1">
+                      <input 
+                        autoFocus
+                        type="text" 
+                        value={editNameValue}
+                        onChange={(e) => setEditNameValue(e.target.value)}
+                        className="bg-slate-950 border border-cyan-500 rounded px-2 py-1 text-2xl font-bold text-white focus:outline-none"
+                      />
+                      <button onClick={updateGroupName} className="p-2 bg-green-600 rounded hover:bg-green-500 text-white"><Save size={18} /></button>
+                      <button onClick={() => setIsEditingName(false)} className="p-2 bg-slate-800 rounded hover:bg-slate-700 text-white"><X size={18} /></button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3 group">
+                      <h2 className="text-2xl font-bold text-white">{selectedGroup.name}</h2>
+                      {isCreator && (
+                        <button 
+                          onClick={() => setIsEditingName(true)} 
+                          className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-cyan-400 transition-opacity"
+                          title="Rename Group"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <p className="text-slate-400 text-sm">Manage members and permissions</p>
                 </div>
                 <div className="px-3 py-1 bg-slate-800 rounded-full text-xs text-cyan-400 border border-slate-700">
@@ -324,7 +414,6 @@ const GroupManager: React.FC<GroupManagerProps> = ({ user, onClose }) => {
                     Invite
                   </button>
                 </form>
-                {/* Show message only if it relates to invites (we assume it does if selectedGroup exists and message is set) */}
                 {message && (
                   <div className={`mt-2 text-xs p-2 rounded ${message.type === 'error' ? 'bg-red-900/20 text-red-400' : 'bg-green-900/20 text-green-400'}`}>
                     {message.text}
@@ -335,29 +424,60 @@ const GroupManager: React.FC<GroupManagerProps> = ({ user, onClose }) => {
               {/* Member List */}
               <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider">Members</h3>
               <div className="space-y-2">
-                {groupMembers.map(member => (
-                  <div key={member.id} className="flex items-center justify-between p-3 bg-slate-950 border border-slate-800 rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-400">
-                        {member.user?.avatar_url ? (
-                          <img src={member.user.avatar_url} className="w-full h-full rounded-full" />
-                        ) : (
-                          <Users size={16} />
-                        )}
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-white flex items-center gap-2">
-                          {member.user?.username || 'Unknown'}
-                          {member.role === 'admin' && <Shield size={12} className="text-yellow-500" />}
+                {groupMembers.map(member => {
+                  const isMe = member.user_id === user.id;
+                  const isMemberCreator = member.role === 'admin';
+                  
+                  return (
+                    <div key={member.id} className="flex items-center justify-between p-3 bg-slate-950 border border-slate-800 rounded-lg group">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-400">
+                          {member.user?.avatar_url ? (
+                            <img src={member.user.avatar_url} className="w-full h-full rounded-full" />
+                          ) : (
+                            <Users size={16} />
+                          )}
                         </div>
-                        <div className="text-xs text-slate-500 capitalize">{member.status}</div>
+                        <div>
+                          <div className="text-sm font-medium text-white flex items-center gap-2">
+                            {member.user?.username || 'Unknown'}
+                            {isMe && <span className="text-xs text-slate-500">(You)</span>}
+                            {member.role === 'admin' && <Shield size={12} className="text-yellow-500" />}
+                          </div>
+                          <div className="text-xs text-slate-500 capitalize">{member.status}</div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                         {member.status === 'pending' && (
+                           <span className="text-xs text-yellow-500 bg-yellow-900/20 px-2 py-1 rounded">Invited</span>
+                         )}
+
+                         {/* Admin Actions: Kick others */}
+                         {isCreator && !isMe && (
+                           <button 
+                             onClick={() => removeMember(member.id, member.user?.username || 'User')}
+                             className="p-2 text-slate-600 hover:text-red-500 hover:bg-red-900/10 rounded transition-colors opacity-0 group-hover:opacity-100"
+                             title="Remove Member"
+                           >
+                             <Trash2 size={16} />
+                           </button>
+                         )}
+
+                         {/* Member Actions: Leave */}
+                         {!isCreator && isMe && (
+                            <button
+                              onClick={() => leaveGroup(member.id)}
+                              className="p-2 text-slate-600 hover:text-red-500 hover:bg-red-900/10 rounded transition-colors"
+                              title="Leave Group"
+                            >
+                              <LogOut size={16} />
+                            </button>
+                         )}
                       </div>
                     </div>
-                    {member.status === 'pending' && (
-                      <span className="text-xs text-yellow-500 bg-yellow-900/20 px-2 py-1 rounded">Invited</span>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ) : (
