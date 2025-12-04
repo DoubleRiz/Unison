@@ -36,6 +36,7 @@ export const useAppData = (session: any, currentView: string, currentSongId: str
         bpm: data.bpm,
         key: data.original_key,
         content: data.content,
+        notes: data.notes, // Added notes mapping
         youtubeUrl: data.youtube_url,
         audioUrl: data.audio_url,
         is_public: data.is_public,
@@ -107,6 +108,7 @@ export const useAppData = (session: any, currentView: string, currentSongId: str
           bpm: s.bpm,
           key: s.original_key,
           content: s.content,
+          notes: s.notes, // Added notes mapping
           youtubeUrl: s.youtube_url,
           audioUrl: s.audio_url, 
           is_public: s.is_public,

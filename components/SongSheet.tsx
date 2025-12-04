@@ -1,9 +1,10 @@
 
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Song, NotationMode } from '../types';
-import { transpose, convertToDegree, getSectionType } from '../utils/musicLogic';
-import { Music2, Heart, Trash2, AlertTriangle, Edit3, ZoomIn, ZoomOut, Mic, MicOff, Play, Pause, GitBranch, Shield } from 'lucide-react';
+import { transpose, convertToDegree, getSectionType, transposeContent } from '../utils/musicLogic';
+import { Music2, Heart, Trash2, AlertTriangle, Edit3, ZoomIn, ZoomOut, Mic, MicOff, Play, Pause, GitBranch, Shield, FileDown, StickyNote, ChevronDown, ChevronUp } from 'lucide-react';
 import CommentsSection from './CommentsSection';
+import { jsPDF } from 'jspdf';
 
 interface SongSheetProps {
   song: Song;
@@ -37,6 +38,7 @@ const SongSheet: React.FC<SongSheetProps> = ({
   // View Settings
   const [fontSize, setFontSize] = useState(1.125); // Default 1.125rem (text-lg)
   const [showChords, setShowChords] = useState(true);
+  const [showNotes, setShowNotes] = useState(true);
 
   // Auto Scroll State
   const [isScrolling, setIsScrolling] = useState(false);
@@ -144,19 +146,43 @@ const SongSheet: React.FC<SongSheetProps> = ({
 
   const renderChordDisplay = (chordString: string | null) => {
     if (!chordString) return null;
-    if (notationMode !== NotationMode.DEGREES) {
-      return chordString;
+    
+    let content: React.ReactNode = chordString;
+
+    if (notationMode === NotationMode.DEGREES) {
+      const match = chordString.match(/^([b#]?[1-7])(.*)$/);
+      if (match) {
+        content = (
+          <>
+            <span className="text-fuchsia-600 dark:text-fuchsia-400">{match[1]}</span>
+            <span className="text-cyan-600 dark:text-cyan-400">{match[2]}</span>
+          </>
+        );
+      }
     }
-    const match = chordString.match(/^([b#]?[1-7])(.*)$/);
-    if (match) {
-      return (
-        <>
-          <span className="text-fuchsia-400">{match[1]}</span>
-          <span className="text-cyan-400">{match[2]}</span>
-        </>
-      );
-    }
-    return chordString;
+
+    // Wrap in non-breaking spaces to simulate the width of brackets []
+    // This preserves exact monospace alignment from the editor
+    return (
+      <span className="whitespace-pre">
+        {content}{'\u00A0'}{'\u00A0'}
+      </span>
+    );
+  };
+
+  // Rich Text Rendering (Italics and Comments)
+  const renderStyledText = (text: string) => {
+    // Split by *italic* or (comment) regex
+    const parts = text.split(/(\*.*?\*|\(.*?\))/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('*') && part.endsWith('*')) {
+        return <i key={i} className="text-slate-500 dark:text-slate-400">{part.slice(1, -1)}</i>;
+      }
+      if (part.startsWith('(') && part.endsWith(')')) {
+        return <span key={i} className="text-slate-500 text-[0.9em]">{part}</span>;
+      }
+      return part;
+    });
   };
 
   const getYoutubeId = (url: string) => {
@@ -174,25 +200,102 @@ const SongSheet: React.FC<SongSheetProps> = ({
     });
   };
 
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    const margin = 10;
+    const lineHeight = 6;
+    
+    // Title
+    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold");
+    doc.text(song.title, margin, 20);
+    
+    // Meta
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "normal");
+    const keyText = transposeSemitones !== 0 
+        ? `${song.key} (${transposeSemitones > 0 ? '+' : ''}${transposeSemitones}) -> ${transpose(song.key, transposeSemitones)}`
+        : song.key;
+    doc.text(`${song.artist} • ${keyText}${song.bpm ? ` • ${song.bpm} BPM` : ''}`, margin, 28);
+
+    // Notes
+    let cursorY = 40;
+    if (song.notes) {
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      const splitNotes = doc.splitTextToSize(song.notes, 180);
+      doc.text(splitNotes, margin, cursorY);
+      cursorY += (splitNotes.length * 5) + 5;
+      doc.setTextColor(0);
+    }
+
+    // Content
+    doc.setFont("courier", "normal");
+    doc.setFontSize(11);
+    
+    const transposedContent = transposeContent(song.content, transposeSemitones);
+    const lines = transposedContent.split('\n');
+
+    lines.forEach(line => {
+      if (cursorY > 280) {
+        doc.addPage();
+        cursorY = 20;
+      }
+
+      const isSection = /^\[(Intro|Verse|Chorus|Refrain|Bridge|Pont|Pre-Chorus|Outro|Solo|Instrumental|Couplet|Strophe).*\]$/i.test(line.trim());
+
+      if (isSection) {
+        cursorY += 4;
+        doc.setFont("courier", "bold");
+        doc.setTextColor(100); 
+        const sectionText = line.trim().replace('[', '').replace(']', '').toUpperCase();
+        doc.text(sectionText, margin, cursorY);
+        doc.setFont("courier", "normal");
+        doc.setTextColor(0);
+        cursorY += lineHeight;
+        return;
+      }
+
+      let cursorX = margin;
+      const segments = line.split(/(\[.*?\])/g);
+
+      segments.forEach(seg => {
+          if (seg.startsWith('[') && seg.endsWith(']')) {
+            const chord = seg.slice(1, -1); 
+            doc.setFont("courier", "bold");
+            doc.text(chord, cursorX, cursorY);
+            cursorX += doc.getTextWidth(chord);
+            doc.setFont("courier", "normal"); 
+          } else {
+            doc.text(seg, cursorX, cursorY);
+            cursorX += doc.getTextWidth(seg);
+          }
+      });
+      cursorY += lineHeight;
+    });
+
+    doc.save(`${song.title}.pdf`);
+  };
+
   return (
     <div ref={containerRef} className={`max-w-4xl mx-auto pb-32 ${className}`}>
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-sm w-full shadow-2xl">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 max-w-sm w-full shadow-2xl">
             <div className="flex flex-col items-center text-center mb-6">
-              <div className="w-12 h-12 bg-red-900/20 text-red-500 rounded-full flex items-center justify-center mb-4">
+              <div className="w-12 h-12 bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-500 rounded-full flex items-center justify-center mb-4">
                 <AlertTriangle size={24} />
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">Delete Song?</h3>
-              <p className="text-slate-400 text-sm">
-                Are you sure you want to delete <span className="text-white font-medium">"{song.title}"</span>? This action cannot be undone.
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Delete Song?</h3>
+              <p className="text-slate-600 dark:text-slate-400 text-sm">
+                Are you sure you want to delete <span className="text-slate-900 dark:text-white font-medium">"{song.title}"</span>? This action cannot be undone.
               </p>
             </div>
             <div className="flex gap-3">
               <button 
                 onClick={() => setShowDeleteConfirm(false)}
-                className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-medium transition-colors"
+                className="flex-1 px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-300 rounded-lg font-medium transition-colors"
               >
                 Cancel
               </button>
@@ -213,9 +316,9 @@ const SongSheet: React.FC<SongSheetProps> = ({
       {/* Auto Scroll Floating Controls */}
       <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2">
         {isScrolling && (
-            <div className="bg-slate-900/90 backdrop-blur border border-slate-700 p-3 rounded-xl shadow-2xl mb-2 flex flex-col gap-2 w-16 items-center">
-               <span className="text-[10px] font-bold text-slate-400 uppercase">Speed</span>
-               <div className="h-32 bg-slate-800 rounded-full w-2 relative">
+            <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur border border-slate-200 dark:border-slate-700 p-3 rounded-xl shadow-2xl mb-2 flex flex-col gap-2 w-16 items-center">
+               <span className="text-[10px] font-bold text-slate-500 uppercase">Speed</span>
+               <div className="h-32 bg-slate-200 dark:bg-slate-800 rounded-full w-2 relative">
                   <div 
                     className="absolute bottom-0 w-full bg-cyan-500 rounded-full"
                     style={{ height: `${(scrollSpeed / 5) * 100}%` }}
@@ -231,12 +334,12 @@ const SongSheet: React.FC<SongSheetProps> = ({
                     style={{ writingMode: 'vertical-lr', direction: 'rtl' }} // Hack for vertical range
                   />
                </div>
-               <span className="font-mono font-bold text-cyan-400">{scrollSpeed}x</span>
+               <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400">{scrollSpeed}x</span>
             </div>
         )}
         <button 
           onClick={() => setIsScrolling(!isScrolling)}
-          className={`h-14 w-14 rounded-full shadow-lg flex items-center justify-center transition-all ${isScrolling ? 'bg-cyan-500 text-white animate-pulse' : 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700'}`}
+          className={`h-14 w-14 rounded-full shadow-lg flex items-center justify-center transition-all ${isScrolling ? 'bg-cyan-500 text-white animate-pulse' : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-white border border-slate-200 dark:border-slate-700'}`}
           title={isScrolling ? "Stop Scrolling" : "Auto Scroll"}
         >
            {isScrolling ? <Pause size={24} /> : <Play size={24} />}
@@ -244,21 +347,28 @@ const SongSheet: React.FC<SongSheetProps> = ({
       </div>
 
       {/* Header */}
-      <div className="mb-4 border-b border-slate-800 pb-6">
+      <div className="mb-4 border-b border-slate-200 dark:border-slate-800 pb-6">
         <div className="flex justify-between items-start mb-4">
           <div>
-            <h1 className="text-4xl font-bold text-white mb-2">{song.title}</h1>
+            <div className="flex items-center gap-3 mb-1">
+              <h1 className="text-5xl font-bold text-slate-900 dark:text-white">{song.title}</h1>
+            </div>
+            
+            {/* Prominent Artist Display */}
+            <div className="text-4xl font-bold text-cyan-600 dark:text-cyan-500 mb-3 mt-2">
+              {song.artist}
+            </div>
+
             <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-4 text-slate-400 text-sm">
-                <span className="px-2 py-1 bg-slate-800 rounded text-cyan-400 font-medium">
+              <div className="flex items-center gap-4 text-slate-500 dark:text-slate-400 text-sm flex-wrap">
+                <span className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded text-cyan-700 dark:text-cyan-400 font-medium border border-slate-200 dark:border-slate-700">
                   {notationMode === NotationMode.LETTERS 
                     ? transpose(song.key, transposeSemitones) 
                     : '1'}
                 </span>
-                <span>{song.artist}</span>
+
                 {song.bpm && (
                   <>
-                    <span>•</span>
                     <span>{song.bpm} BPM</span>
                   </>
                 )}
@@ -266,7 +376,7 @@ const SongSheet: React.FC<SongSheetProps> = ({
               
               {/* Fork Source Badge */}
               {song.forked_from && (
-                <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-1">
+                <div className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500 mt-1">
                    <GitBranch size={12} />
                    <span>Based on an arrangement</span>
                 </div>
@@ -279,7 +389,7 @@ const SongSheet: React.FC<SongSheetProps> = ({
             {canEdit && onDelete && (
               <button
                 onClick={() => setShowDeleteConfirm(true)}
-                className="p-3 rounded-full bg-slate-800 text-slate-400 hover:text-red-400 hover:bg-red-900/20 transition-all border border-slate-700 relative group"
+                className="p-3 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/20 transition-all border border-slate-200 dark:border-slate-700 relative group"
                 title={isAdmin && !isOwner ? "Delete (Admin)" : "Delete Song"}
               >
                 <Trash2 size={20} />
@@ -291,7 +401,7 @@ const SongSheet: React.FC<SongSheetProps> = ({
             {onEdit && (canEdit || song.shared_with_group_id) && (
               <button
                 onClick={onEdit}
-                className="p-3 rounded-full bg-slate-800 text-slate-400 hover:text-cyan-400 hover:bg-cyan-900/20 transition-all border border-slate-700 relative"
+                className="p-3 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-cyan-100 dark:hover:bg-cyan-900/20 transition-all border border-slate-200 dark:border-slate-700 relative"
                 title={isAdmin && !isOwner ? "Edit (Admin)" : "Edit Song"}
               >
                 <Edit3 size={20} />
@@ -302,7 +412,7 @@ const SongSheet: React.FC<SongSheetProps> = ({
             {session && (
               <button 
                 onClick={toggleFavorite}
-                className={`p-3 rounded-full transition-all border border-slate-700 ${isFavorite ? 'bg-pink-500/20 text-pink-500 border-pink-500/30' : 'bg-slate-800 text-slate-400 hover:text-pink-400'}`}
+                className={`p-3 rounded-full transition-all border ${isFavorite ? 'bg-pink-100 dark:bg-pink-500/20 text-pink-500 border-pink-200 dark:border-pink-500/30' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-pink-400 border-slate-200 dark:border-slate-700'}`}
                 title="Toggle Favorite"
               >
                 <Heart size={20} fill={isFavorite ? "currentColor" : "none"} />
@@ -315,12 +425,12 @@ const SongSheet: React.FC<SongSheetProps> = ({
         {(song.genres?.length || 0) + (song.tags?.length || 0) > 0 && (
           <div className="flex flex-wrap gap-2 mb-4">
             {song.genres?.map(genre => (
-              <span key={genre} className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-xs border border-slate-700">
+              <span key={genre} className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-slate-700">
                 {genre}
               </span>
             ))}
             {song.tags?.map(tag => (
-              <span key={tag} className="px-2 py-0.5 rounded-full bg-purple-900/30 text-purple-300 text-xs border border-purple-800/50">
+              <span key={tag} className="px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-300 text-xs border border-purple-200 dark:border-purple-800/50">
                 #{tag}
               </span>
             ))}
@@ -328,11 +438,11 @@ const SongSheet: React.FC<SongSheetProps> = ({
         )}
 
         {/* View Controls Toolbar */}
-        <div className="flex items-center justify-between bg-slate-900/50 p-2 rounded-lg border border-slate-800/50">
+        <div className="flex items-center justify-between bg-slate-100 dark:bg-slate-900/50 p-2 rounded-lg border border-slate-200 dark:border-slate-800/50">
           <div className="flex items-center gap-2">
             <button 
               onClick={() => adjustFontSize(-0.1)}
-              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
+              className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800 rounded transition-colors"
               title="Decrease Font Size"
             >
               <ZoomOut size={18} />
@@ -342,35 +452,66 @@ const SongSheet: React.FC<SongSheetProps> = ({
             </span>
             <button 
               onClick={() => adjustFontSize(0.1)}
-              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
+              className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800 rounded transition-colors"
               title="Increase Font Size"
             >
               <ZoomIn size={18} />
             </button>
             
-            <div className="w-px h-6 bg-slate-800 mx-2"></div>
+            <div className="w-px h-6 bg-slate-300 dark:bg-slate-800 mx-2"></div>
             
             <button
               onClick={() => setShowChords(!showChords)}
               className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
                 !showChords 
                   ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20' 
-                  : 'bg-slate-800 text-slate-400 hover:text-white'
+                  : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
               title={showChords ? "Hide Chords (Singer Mode)" : "Show Chords"}
             >
               {!showChords ? <Mic size={14} /> : <MicOff size={14} />}
               {showChords ? 'Hide Chords' : 'Lyrics Only'}
             </button>
+
+            {song.notes && (
+              <button
+                onClick={() => setShowNotes(!showNotes)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors ml-2 ${
+                   showNotes ? 'bg-slate-300 dark:bg-slate-700 text-slate-900 dark:text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <StickyNote size={14} /> Notes
+              </button>
+            )}
           </div>
+
+          <button 
+             onClick={handleExportPDF}
+             className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors"
+             title="Download PDF"
+          >
+             <FileDown size={14} /> PDF
+          </button>
         </div>
       </div>
+
+      {/* Notes Section (Collapsible) */}
+      {song.notes && showNotes && (
+        <div className="mb-8 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 rounded-xl p-4">
+           <div className="text-xs font-bold text-amber-600 dark:text-amber-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+             <StickyNote size={12} /> Song Info / Performance Notes
+           </div>
+           <div className="text-slate-700 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed">
+             {song.notes}
+           </div>
+        </div>
+      )}
 
       {/* Media Player Section */}
       <div className="grid grid-cols-1 gap-6 mb-8">
         {/* YouTube Embed */}
         {youtubeId && (
-          <div className="aspect-video w-full rounded-xl overflow-hidden shadow-2xl shadow-black/50 bg-slate-900">
+          <div className="aspect-video w-full rounded-xl overflow-hidden shadow-2xl shadow-black/20 dark:shadow-black/50 bg-slate-100 dark:bg-slate-900">
             <iframe
               className="w-full h-full"
               src={`https://www.youtube.com/embed/${youtubeId}`}
@@ -383,12 +524,12 @@ const SongSheet: React.FC<SongSheetProps> = ({
 
         {/* Audio Player */}
         {song.audioUrl && (
-           <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center gap-4">
-             <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center text-cyan-500">
+           <div className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-center gap-4">
+             <div className="w-10 h-10 bg-slate-200 dark:bg-slate-800 rounded-full flex items-center justify-center text-cyan-600 dark:text-cyan-500">
                <Music2 size={20} />
              </div>
              <div className="flex-1">
-                <div className="text-xs text-slate-400 mb-1 uppercase tracking-wider font-semibold">Audio Reference</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider font-semibold">Audio Reference</div>
                 <audio controls className="w-full h-8 block" src={song.audioUrl}>
                   Your browser does not support the audio element.
                 </audio>
@@ -407,7 +548,7 @@ const SongSheet: React.FC<SongSheetProps> = ({
           if (lineObj.isSection) {
             return (
               <div key={lineIdx} className="mt-8 mb-4">
-                 <span className="inline-block px-3 py-1 rounded bg-slate-800 border border-slate-700 text-cyan-400 text-sm font-bold uppercase tracking-widest shadow-sm">
+                 <span className="inline-block px-3 py-1 rounded bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-cyan-700 dark:text-cyan-400 text-sm font-bold uppercase tracking-widest shadow-sm">
                    {lineObj.text}
                  </span>
               </div>
@@ -443,7 +584,7 @@ const SongSheet: React.FC<SongSheetProps> = ({
                     return (
                       <div key={segIdx} className="flex">
                         {chordString && showChords && (
-                          <span className={`font-bold select-none mr-0.5 ${notationMode === NotationMode.DEGREES ? '' : 'text-cyan-400'}`}>
+                          <span className={`font-bold select-none ${notationMode === NotationMode.DEGREES ? '' : 'text-cyan-600 dark:text-cyan-400'}`}>
                             {renderChordDisplay(chordString)}
                           </span>
                         )}
@@ -458,13 +599,13 @@ const SongSheet: React.FC<SongSheetProps> = ({
                   return (
                     <div key={segIdx} className="flex flex-col group relative">
                       {chordString && showChords && (
-                        <div className={`font-bold text-[0.9em] leading-none select-none mb-0.5 ${notationMode === NotationMode.DEGREES ? '' : 'text-cyan-400'}`}>
+                        <div className={`font-bold text-[0.9em] leading-none select-none mb-0.5 ${notationMode === NotationMode.DEGREES ? '' : 'text-cyan-600 dark:text-cyan-400'}`}>
                           {renderChordDisplay(chordString)}
                         </div>
                       )}
                       
-                      <div className="text-slate-300 whitespace-pre leading-none">
-                        {segment.lyrics}
+                      <div className="text-slate-800 dark:text-slate-300 whitespace-pre leading-none">
+                        {renderStyledText(segment.lyrics)}
                       </div>
                     </div>
                   );

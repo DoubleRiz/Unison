@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
+        darkMode: 'class', // Enable manual toggling
         theme: {
           extend: {
             colors: {
@@ -33,7 +34,7 @@
 }
 </script>
 </head>
-  <body class="bg-slate-950 text-slate-200 antialiased">
+  <body class="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-200 antialiased transition-colors duration-300">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>

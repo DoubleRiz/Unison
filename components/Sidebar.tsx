@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Song, Group } from '../types';
-import { Music, Search, Heart, List, Users, User, LogOut, Plus, Filter, ShieldQuestion, X } from 'lucide-react';
+import { Music, Search, Heart, List, Users, User, LogOut, Plus, Filter, ShieldQuestion, X, Grid3X3, BookOpen } from 'lucide-react';
 
 interface SidebarProps {
   session: any;
@@ -150,6 +150,26 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           <div className="p-4 border-t border-slate-800 flex flex-col gap-2">
+            
+            {/* Tools Section */}
+            <div className="mb-2 pb-2 border-b border-slate-800/50">
+               <div className="text-[10px] uppercase font-bold text-slate-500 mb-1 px-2">Tools</div>
+               <button 
+                onClick={() => handleNavigation('chord-dictionary')}
+                className={`w-full flex items-center gap-3 px-2 py-2 mb-1 rounded-lg transition-colors relative ${currentView === 'chord-dictionary' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-800/50'}`}
+              >
+                <Grid3X3 size={16} />
+                <span className="font-medium text-sm">Chord Dictionary</span>
+              </button>
+               <button 
+                onClick={() => handleNavigation('progressions')}
+                className={`w-full flex items-center gap-3 px-2 py-2 rounded-lg transition-colors relative ${currentView === 'progressions' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-800/50'}`}
+              >
+                <BookOpen size={16} />
+                <span className="font-medium text-sm">Progressions</span>
+              </button>
+            </div>
+
             <button 
               onClick={() => handleNavigation('groups')}
               className={`flex items-center gap-3 px-2 py-3 mb-1 rounded-lg transition-colors relative ${currentView === 'groups' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-800/50'}`}

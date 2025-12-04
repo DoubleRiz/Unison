@@ -1,7 +1,8 @@
+
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Song } from '../types';
-import { Loader2, Music, Search, Heart, User, Filter } from 'lucide-react';
+import { Loader2, Music, Search, Heart, User, Filter, BookOpen, Quote } from 'lucide-react';
 
 interface LandingPageProps {
   onSelectSong: (songId: string) => void;
@@ -12,10 +13,41 @@ const LandingPage: React.FC<LandingPageProps> = ({ onSelectSong, onNavigateToAdv
   const [recentSongs, setRecentSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Verse of the Day State
+  const [verse, setVerse] = useState({ 
+    text: "For everyone born of God overcomes the world. This is the victory that has overcome the world, even our faith.", 
+    reference: "1 John 5:4" 
+  });
+  const [loadingVerse, setLoadingVerse] = useState(true);
 
   useEffect(() => {
     fetchPublicSongs();
+    fetchVerseOfTheDay();
   }, []);
+
+  const fetchVerseOfTheDay = async () => {
+    try {
+      // Using OurManna API for Verse of the Day
+      const response = await fetch('https://beta.ourmanna.com/api/v1/get/?format=json&order=daily');
+      if (!response.ok) throw new Error('API Error');
+      
+      const data = await response.json();
+      setVerse({
+        text: data.verse.details.text,
+        reference: data.verse.details.reference
+      });
+    } catch (error) {
+      // Fallback to 1 John 5:4 if API fails
+      console.log("Using fallback verse");
+      setVerse({ 
+        text: "For everyone born of God overcomes the world. This is the victory that has overcome the world, even our faith.", 
+        reference: "1 John 5:4" 
+      });
+    } finally {
+      setLoadingVerse(false);
+    }
+  };
 
   const fetchPublicSongs = async () => {
     setLoading(true);
@@ -55,8 +87,14 @@ const LandingPage: React.FC<LandingPageProps> = ({ onSelectSong, onNavigateToAdv
   return (
     <div className="flex flex-col min-h-screen bg-slate-950">
       {/* Hero Section */}
-      <div className="bg-gradient-to-b from-slate-900 to-slate-950 py-20 px-6 border-b border-slate-800">
-        <div className="max-w-4xl mx-auto text-center">
+      <div className="bg-gradient-to-b from-slate-900 to-slate-950 py-20 px-6 border-b border-slate-800 relative overflow-hidden">
+        {/* Decorative Background Elements */}
+        <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none opacity-20">
+          <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-cyan-600/30 rounded-full blur-3xl"></div>
+          <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-purple-600/30 rounded-full blur-3xl"></div>
+        </div>
+
+        <div className="max-w-4xl mx-auto text-center relative z-10">
           <h1 className="text-5xl md:text-6xl font-bold text-white mb-6 tracking-tight">
             Share your <span className="text-cyan-400">chords</span>.<br/>
             Play with the world.
@@ -65,7 +103,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onSelectSong, onNavigateToAdv
             The collaborative platform for musicians. Create professional song sheets, transpose instantly, and build setlists with your band.
           </p>
           
-          <div className="relative max-w-xl mx-auto space-y-4">
+          <div className="relative max-w-xl mx-auto space-y-4 mb-12">
             <div className="relative">
               <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
                 <Search className="text-slate-500" size={20} />
@@ -75,7 +113,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onSelectSong, onNavigateToAdv
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search for a song, artist, or tag..."
-                className="w-full bg-slate-800/50 border border-slate-700 text-white rounded-full py-4 pl-12 pr-6 text-lg focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition-all placeholder:text-slate-600"
+                className="w-full bg-slate-800/80 backdrop-blur border border-slate-700 text-white rounded-full py-4 pl-12 pr-6 text-lg focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition-all placeholder:text-slate-600 shadow-xl"
               />
             </div>
             
@@ -89,6 +127,28 @@ const LandingPage: React.FC<LandingPageProps> = ({ onSelectSong, onNavigateToAdv
               </button>
             )}
           </div>
+
+          {/* Verse of the Day Card */}
+          <div className="max-w-2xl mx-auto bg-slate-900/50 backdrop-blur-md border border-slate-800 rounded-xl p-6 text-center shadow-lg relative group">
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-950 p-2 rounded-full border border-slate-800 text-cyan-500">
+               <BookOpen size={18} />
+            </div>
+            {loadingVerse ? (
+              <div className="flex justify-center p-2">
+                <Loader2 size={20} className="animate-spin text-slate-600" />
+              </div>
+            ) : (
+              <>
+                <div className="text-lg text-slate-300 italic mb-2 font-serif relative px-8">
+                   <Quote size={14} className="absolute top-0 left-0 text-slate-700 transform -scale-x-100" />
+                   {verse.text}
+                   <Quote size={14} className="absolute bottom-0 right-0 text-slate-700" />
+                </div>
+                <div className="text-sm font-bold text-cyan-500 uppercase tracking-widest">{verse.reference}</div>
+              </>
+            )}
+          </div>
+
         </div>
       </div>
 

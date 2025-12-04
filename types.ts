@@ -7,6 +7,7 @@ export interface Song {
   bpm: number | null;
   key: string; 
   content: string; 
+  notes?: string; // Performance notes, verses, effect settings
   youtubeUrl?: string;
   audioUrl?: string;
   is_public: boolean;

@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect } from 'react';
 import { Song, Group, GENRES } from '../types';
-import { Save, X, Globe, Lock, Music2, Users, Tag, Plus } from 'lucide-react';
+import { Save, X, Globe, Lock, Music2, Users, Tag, Plus, StickyNote } from 'lucide-react';
 
 interface SongEditorProps {
   initialSong?: Song | null;
@@ -22,6 +23,7 @@ const SongEditor: React.FC<SongEditorProps> = ({ initialSong, groups, existingTa
   const [keyQuality, setKeyQuality] = useState('Major'); // 'Major' or 'Minor'
 
   const [content, setContent] = useState('');
+  const [notes, setNotes] = useState('');
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [audioUrl, setAudioUrl] = useState('');
   const [isPublic, setIsPublic] = useState(false);
@@ -46,6 +48,7 @@ const SongEditor: React.FC<SongEditorProps> = ({ initialSong, groups, existingTa
       setKeyQuality(isMinor ? 'Minor' : 'Major');
 
       setContent(initialSong.content);
+      setNotes(initialSong.notes || '');
       setYoutubeUrl(initialSong.youtubeUrl || '');
       setAudioUrl(initialSong.audioUrl || '');
       setIsPublic(initialSong.is_public);
@@ -67,6 +70,7 @@ const SongEditor: React.FC<SongEditorProps> = ({ initialSong, groups, existingTa
 This is how you write a song
 [Am]             [F]
 With sections clearly marked`);
+      setNotes('');
       setYoutubeUrl('');
       setAudioUrl('');
       setIsPublic(false);
@@ -116,6 +120,7 @@ With sections clearly marked`);
       bpm: bpm === '' ? null : Number(bpm),
       key: fullKey,
       content,
+      notes,
       youtubeUrl,
       audioUrl,
       is_public: isPublic,
@@ -124,6 +129,9 @@ With sections clearly marked`);
       tags: tags
     });
   };
+
+  // Calculate Sounding Key
+  const currentKey = `${keyRoot}${keyQuality === 'Minor' ? 'm' : ''}`;
 
   return (
     <form onSubmit={handleSubmit} className="max-w-3xl mx-auto p-6 bg-slate-900 rounded-xl border border-slate-800 shadow-xl">
@@ -161,9 +169,9 @@ With sections clearly marked`);
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 mb-4">
+      <div className="grid grid-cols-2 gap-4 mb-4">
         {/* Key Selector Split */}
-        <div className="col-span-1">
+        <div>
           <label className="block text-xs font-medium text-slate-400 mb-1">Key</label>
           <div className="flex gap-1">
             <select 
@@ -185,8 +193,8 @@ With sections clearly marked`);
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-slate-400 mb-1">BPM</label>
-          <input
+           <label className="block text-xs font-medium text-slate-400 mb-1">BPM</label>
+           <input
             type="number"
             value={bpm}
             onChange={(e) => setBpm(e.target.value)}
@@ -339,6 +347,19 @@ This is how you write a song...`}
             Use monospace spaces to align
           </div>
         </div>
+      </div>
+
+      {/* Notes / Verses */}
+      <div className="mb-6">
+        <label className="block text-xs font-medium text-slate-400 mb-1 flex items-center gap-2">
+          <StickyNote size={12} /> Performance Notes / Info / Verse
+        </label>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          className="w-full h-24 bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-cyan-500 text-slate-300 resize-none placeholder:text-slate-700"
+          placeholder="Add verses, fx settings, or performance instructions here..."
+        />
       </div>
 
       <div className="flex justify-end gap-3">

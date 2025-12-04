@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Song, NotationMode } from './types';
 import { supabase } from './lib/supabaseClient';
@@ -14,6 +13,8 @@ import Navbar from './components/Navbar';
 import LandingPage from './components/LandingPage';
 import AdvancedSearch from './components/AdvancedSearch';
 import HelpPage from './components/HelpPage';
+import ChordDictionary from './components/tools/ChordDictionary';
+import ChordProgressions from './components/tools/ChordProgressions';
 import { 
   Minus, 
   Plus, 
@@ -31,15 +32,27 @@ import {
   Filter,
   ChevronLeft,
   Music,
-  ShieldQuestion
+  ShieldQuestion,
+  Grid3X3,
+  BookOpen,
+  Sun,
+  Moon
 } from 'lucide-react';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
   
+  // Theme State
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('theme') as 'light' | 'dark' || 'dark';
+    }
+    return 'dark';
+  });
+  
   // Navigation & UI State
   const [currentSongId, setCurrentSongId] = useState<string | null>(null);
-  const [currentView, setCurrentView] = useState<'landing' | 'main' | 'editor' | 'profile' | 'setlists' | 'groups' | 'search' | 'help'>('landing'); 
+  const [currentView, setCurrentView] = useState<'landing' | 'main' | 'editor' | 'profile' | 'setlists' | 'groups' | 'search' | 'help' | 'chord-dictionary' | 'progressions'>('landing'); 
   const [transpose, setTranspose] = useState(0);
   const [notationMode, setNotationMode] = useState<NotationMode>(NotationMode.LETTERS);
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -49,6 +62,18 @@ const App: React.FC = () => {
   const [showConflictModal, setShowConflictModal] = useState(false);
   const [conflictSongData, setConflictSongData] = useState<Song | null>(null);
   const [editorTemplate, setEditorTemplate] = useState<Song | null>(null);
+
+  // Apply Theme Effect
+  useEffect(() => {
+    const root = window.document.documentElement;
+    root.classList.remove('light', 'dark');
+    root.classList.add(theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'light' ? 'dark' : 'light');
+  };
 
   // Responsive: Close sidebar by default on mobile load
   useEffect(() => {
@@ -108,10 +133,6 @@ const App: React.FC = () => {
     }
   };
 
-  const safeUUID = () => {
-    return Date.now().toString(36) + Math.random().toString(36).substring(2);
-  };
-
   const handleSaveSong = async (songData: Song) => {
     if (!session) return;
     
@@ -140,6 +161,7 @@ const App: React.FC = () => {
         bpm: songData.bpm,
         original_key: songData.key,
         content: songData.content,
+        notes: songData.notes,
         youtube_url: songData.youtubeUrl,
         audio_url: songData.audioUrl,
         is_public: songData.is_public,
@@ -163,7 +185,6 @@ const App: React.FC = () => {
         const newSong: Song = { ...songData, id: data.id, user_id: session.user.id, is_favorite: false };
         setSongs([newSong, ...songs]);
         setCurrentSongId(data.id);
-        // Clear template if it was a fork
         if (editorTemplate) setEditorTemplate(null);
       } else {
         const { error } = await supabase
@@ -249,6 +270,14 @@ const App: React.FC = () => {
 
     if (currentView === 'help') {
       return <HelpPage onBack={() => setCurrentView(session ? 'main' : 'landing')} />;
+    }
+
+    if (currentView === 'chord-dictionary') {
+      return <ChordDictionary />;
+    }
+
+    if (currentView === 'progressions') {
+      return <ChordProgressions />;
     }
 
     if (currentView === 'search') {
@@ -354,7 +383,7 @@ const App: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="h-screen bg-slate-950 flex items-center justify-center text-cyan-500">
+      <div className="h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center text-cyan-600 dark:text-cyan-500">
         <Loader2 className="animate-spin" size={48} />
       </div>
     );
@@ -363,14 +392,18 @@ const App: React.FC = () => {
   // GUEST / LANDING VIEW
   if (!session) {
     return (
-      <div className="bg-slate-950 min-h-screen font-sans text-slate-200">
+      <div className="bg-slate-50 dark:bg-slate-950 min-h-screen font-sans text-slate-900 dark:text-slate-200 transition-colors duration-300">
         <Navbar 
           session={null} 
+          theme={theme}
+          toggleTheme={toggleTheme}
           onOpenAuth={() => setShowAuthModal(true)} 
           onSignOut={() => {}}
           onNavigateHome={() => setCurrentView('landing')}
           onNavigateProfile={() => {}}
           onNavigateHelp={() => setCurrentView('help')}
+          onNavigateDictionary={() => setCurrentView('chord-dictionary')}
+          onNavigateProgressions={() => setCurrentView('progressions')}
         />
         {showAuthModal && <Auth onClose={() => setShowAuthModal(false)} />}
 
@@ -387,6 +420,10 @@ const App: React.FC = () => {
            <div className="max-w-6xl mx-auto p-4 md:p-6 min-h-[calc(100vh-64px)]">
              <HelpPage onBack={() => setCurrentView('landing')} />
            </div>
+        ) : currentView === 'chord-dictionary' ? (
+           <ChordDictionary />
+        ) : currentView === 'progressions' ? (
+           <ChordProgressions />
         ) : currentView === 'search' ? (
            <AdvancedSearch
              session={null}
@@ -399,25 +436,25 @@ const App: React.FC = () => {
         ) : (
           <div className="max-w-6xl mx-auto p-4 md:p-6 min-h-[calc(100vh-64px)]">
              {/* Sticky Sub-header for tools */}
-             <div className="mb-6 flex flex-wrap justify-between items-center sticky top-16 z-20 bg-slate-950/95 py-4 border-b border-slate-800/50 -mx-4 md:-mx-6 px-4 md:px-6 gap-2">
-                <button onClick={() => setCurrentView('landing')} className="text-slate-400 hover:text-white flex items-center gap-2 text-sm md:text-base">
+             <div className="mb-6 flex flex-wrap justify-between items-center sticky top-16 z-20 bg-white/95 dark:bg-slate-950/95 py-4 border-b border-slate-200 dark:border-slate-800/50 -mx-4 md:-mx-6 px-4 md:px-6 gap-2">
+                <button onClick={() => setCurrentView('landing')} className="text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-white flex items-center gap-2 text-sm md:text-base transition-colors">
                    <ChevronLeft size={20} /> Back
                 </button>
                 {currentSong && (
                    <div className="flex items-center gap-3">
-                     <div className="flex items-center gap-2 bg-slate-900 p-1.5 rounded-lg border border-slate-800">
-                        <button onClick={() => changeTranspose(-1)} className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white">
+                     <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-lg border border-slate-200 dark:border-slate-800">
+                        <button onClick={() => changeTranspose(-1)} className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 rounded text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-white">
                           <Minus size={16} />
                         </button>
-                        <span className="w-8 md:w-10 text-center text-cyan-400 font-mono font-bold text-sm">{transpose > 0 ? `+${transpose}` : transpose}</span>
-                        <button onClick={() => changeTranspose(1)} className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white">
+                        <span className="w-8 md:w-10 text-center text-cyan-600 dark:text-cyan-400 font-mono font-bold text-sm">{transpose > 0 ? `+${transpose}` : transpose}</span>
+                        <button onClick={() => changeTranspose(1)} className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 rounded text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-white">
                           <Plus size={16} />
                         </button>
                      </div>
                      
                      <button 
                         onClick={() => setNotationMode(m => m === NotationMode.LETTERS ? NotationMode.DEGREES : NotationMode.LETTERS)}
-                        className="flex items-center gap-2 px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm font-medium text-slate-300 hover:text-white transition-colors"
+                        className="flex items-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-cyan-600 dark:hover:text-white transition-colors"
                       >
                          {notationMode === NotationMode.LETTERS ? <Hash size={18} /> : <Type size={18} />}
                          <span className="hidden sm:inline">{notationMode === NotationMode.LETTERS ? 'Letters' : 'Degrees'}</span>
@@ -434,24 +471,24 @@ const App: React.FC = () => {
 
   // CONNECTED VIEW
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-200 font-sans overflow-hidden">
+    <div className="flex h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-200 font-sans overflow-hidden transition-colors duration-300">
       
       {showConflictModal && conflictSongData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-md w-full shadow-2xl">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 max-w-md w-full shadow-2xl">
             <div className="flex flex-col items-center text-center mb-6">
-              <div className="w-12 h-12 bg-yellow-900/20 text-yellow-500 rounded-full flex items-center justify-center mb-4">
+              <div className="w-12 h-12 bg-yellow-100 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-500 rounded-full flex items-center justify-center mb-4">
                 <AlertTriangle size={24} />
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">Duplicate Song Detected</h3>
-              <p className="text-slate-400 text-sm mb-4">
-                You already have a song named <span className="text-white font-medium">"{conflictSongData.title}"</span> by <span className="text-white font-medium">{conflictSongData.artist}</span>.
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Duplicate Song Detected</h3>
+              <p className="text-slate-500 dark:text-slate-400 text-sm mb-4">
+                You already have a song named <span className="text-slate-900 dark:text-white font-medium">"{conflictSongData.title}"</span> by <span className="text-slate-900 dark:text-white font-medium">{conflictSongData.artist}</span>.
               </p>
             </div>
             <div className="flex flex-col gap-2">
               <button 
                 onClick={() => { setShowConflictModal(false); setConflictSongData(null); }}
-                className="w-full px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium transition-colors"
+                className="w-full px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white rounded-lg text-sm font-medium transition-colors"
               >
                 Back to Editor
               </button>
@@ -477,7 +514,6 @@ const App: React.FC = () => {
         currentView={currentView}
         isSidebarOpen={isSidebarOpen}
         onCloseMobile={() => {
-           // On mobile, close sidebar after selection
            if (window.innerWidth < 768) setIsSidebarOpen(false);
         }}
         onNavigate={setCurrentView}
@@ -490,22 +526,24 @@ const App: React.FC = () => {
         onCreateSong={createNewSong}
       />
 
-      <main className="flex-1 flex flex-col h-full relative w-full">
-        <header className="h-16 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-4 md:px-6 sticky top-0 z-20 shrink-0">
+      <main className="flex-1 flex flex-col h-full relative w-full bg-white dark:bg-slate-950 transition-colors duration-300">
+        <header className="h-16 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 md:px-6 sticky top-0 z-20 shrink-0">
           
           {/* ZONE GAUCHE : Navigation & Titres */}
           <div className="flex items-center gap-3 md:gap-4 overflow-hidden">
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className={`p-2 rounded-lg transition-colors flex-shrink-0 ${!isSidebarOpen ? 'text-white bg-slate-800' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+              className={`p-2 rounded-lg transition-colors flex-shrink-0 ${!isSidebarOpen ? 'text-cyan-600 dark:text-white bg-slate-100 dark:bg-slate-800' : 'text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}
             >
               <PanelLeft size={20} />
             </button>
             
             <div className="truncate">
-              {currentView === 'landing' && <h2 className="text-lg md:text-xl font-bold text-white flex items-center gap-2 truncate"><Globe size={20} className="text-cyan-400 shrink-0" /> <span className="hidden sm:inline">Community Library</span><span className="sm:hidden">Community</span></h2>}
-              {currentView === 'search' && <h2 className="text-lg md:text-xl font-bold text-white flex items-center gap-2 truncate"><Filter size={20} className="text-purple-400 shrink-0" /> <span className="hidden sm:inline">Advanced Library</span><span className="sm:hidden">Library</span></h2>}
-              {currentView === 'help' && <h2 className="text-lg md:text-xl font-bold text-white flex items-center gap-2 truncate"><ShieldQuestion size={20} className="text-cyan-400 shrink-0" /> Help</h2>}
+              {currentView === 'landing' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><Globe size={20} className="text-cyan-500 shrink-0" /> <span className="hidden sm:inline">Community Library</span><span className="sm:hidden">Community</span></h2>}
+              {currentView === 'search' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><Filter size={20} className="text-purple-500 shrink-0" /> <span className="hidden sm:inline">Advanced Library</span><span className="sm:hidden">Library</span></h2>}
+              {currentView === 'help' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><ShieldQuestion size={20} className="text-cyan-500 shrink-0" /> Help</h2>}
+              {currentView === 'chord-dictionary' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><Grid3X3 size={20} className="text-cyan-500 shrink-0" /> Chords</h2>}
+              {currentView === 'progressions' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><BookOpen size={20} className="text-purple-500 shrink-0" /> Progressions</h2>}
               
               {currentView === 'main' && currentSong && (
                 <div className="hidden md:flex items-center gap-2 text-slate-500 text-sm">
@@ -514,18 +552,27 @@ const App: React.FC = () => {
                 </div>
               )}
               
-              {currentView === 'profile' && <h2 className="text-lg md:text-xl font-bold text-white flex items-center gap-2 truncate"><Settings size={20} className="text-slate-400 shrink-0" /> Settings</h2>}
-              {currentView === 'setlists' && <h2 className="text-lg md:text-xl font-bold text-white flex items-center gap-2 truncate"><List size={20} className="text-slate-400 shrink-0" /> <span className="hidden sm:inline">Setlist Manager</span><span className="sm:hidden">Setlists</span></h2>}
-              {currentView === 'groups' && <h2 className="text-lg md:text-xl font-bold text-white flex items-center gap-2 truncate"><Users size={20} className="text-slate-400 shrink-0" /> <span className="hidden sm:inline">Group Manager</span><span className="sm:hidden">Groups</span></h2>}
-              {currentView === 'editor' && <h2 className="text-lg md:text-xl font-bold text-white flex items-center gap-2 truncate"><Edit3 size={20} className="text-slate-400 shrink-0" /> Editor</h2>}
+              {currentView === 'profile' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><Settings size={20} className="text-slate-400 shrink-0" /> Settings</h2>}
+              {currentView === 'setlists' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><List size={20} className="text-slate-400 shrink-0" /> <span className="hidden sm:inline">Setlist Manager</span><span className="sm:hidden">Setlists</span></h2>}
+              {currentView === 'groups' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><Users size={20} className="text-slate-400 shrink-0" /> <span className="hidden sm:inline">Group Manager</span><span className="sm:hidden">Groups</span></h2>}
+              {currentView === 'editor' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><Edit3 size={20} className="text-slate-400 shrink-0" /> Editor</h2>}
             </div>
           </div>
 
-          {/* ZONE DROITE : Outils (Transposeur, Notation, Aide) */}
+          {/* ZONE DROITE : Outils */}
           <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
+             {/* Theme Toggle in Dashboard */}
+             <button
+              onClick={toggleTheme}
+              className="p-2 text-slate-400 hover:text-yellow-600 dark:hover:text-yellow-400 transition-colors"
+              title="Toggle Theme"
+             >
+               {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+             </button>
+
              <button 
                 onClick={() => setCurrentView('help')}
-                className="p-2 hover:bg-slate-800 rounded-md text-slate-400 hover:text-white transition-colors"
+                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-white transition-colors"
                 title="Help"
               >
                 <ShieldQuestion size={20} />
@@ -533,27 +580,27 @@ const App: React.FC = () => {
              
             {currentView === 'main' && currentSong && (
               <>
-                <div className="h-8 w-px bg-slate-800 mx-1 hidden sm:block"></div>
+                <div className="h-8 w-px bg-slate-200 dark:bg-slate-800 mx-1 hidden sm:block"></div>
                 
-                <div className="flex items-center bg-slate-800 rounded-lg p-1 border border-slate-700 shadow-sm">
-                  <button onClick={() => changeTranspose(-1)} className="p-1.5 md:p-2 hover:bg-slate-700 rounded-md text-slate-400 hover:text-white transition-colors"><Minus size={16} /></button>
-                  <div className="w-10 md:w-16 text-center font-mono font-bold text-cyan-400 text-sm">{transpose > 0 ? `+${transpose}` : transpose}</div>
-                  <button onClick={() => changeTranspose(1)} className="p-1.5 md:p-2 hover:bg-slate-700 rounded-md text-slate-400 hover:text-white transition-colors"><Plus size={16} /></button>
+                <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-1 border border-slate-200 dark:border-slate-700 shadow-sm">
+                  <button onClick={() => changeTranspose(-1)} className="p-1.5 md:p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-white transition-colors"><Minus size={16} /></button>
+                  <div className="w-10 md:w-16 text-center font-mono font-bold text-cyan-600 dark:text-cyan-400 text-sm">{transpose > 0 ? `+${transpose}` : transpose}</div>
+                  <button onClick={() => changeTranspose(1)} className="p-1.5 md:p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-white transition-colors"><Plus size={16} /></button>
                 </div>
                 
-                <div className="h-8 w-px bg-slate-800 mx-1 hidden sm:block"></div>
+                <div className="h-8 w-px bg-slate-200 dark:bg-slate-800 mx-1 hidden sm:block"></div>
                 
                 <button 
                   onClick={() => setNotationMode(m => m === NotationMode.LETTERS ? NotationMode.DEGREES : NotationMode.LETTERS)}
                   className={`flex items-center gap-2 px-2 md:px-3 py-2 rounded-lg border transition-all ${
                     notationMode === NotationMode.DEGREES 
-                      ? 'bg-purple-900/30 border-purple-500/50 text-purple-300' 
-                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
+                      ? 'bg-purple-100 dark:bg-purple-900/30 border-purple-300 dark:border-purple-500/50 text-purple-600 dark:text-purple-300' 
+                      : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-cyan-600 dark:hover:text-white'
                   }`}
                   title="Toggle Notation Mode"
                 >
                     {notationMode === NotationMode.LETTERS ? <Hash size={18} /> : <Type size={18} />}
-                    <span className="hidden sm:inline font-medium">{notationMode === NotationMode.LETTERS ? 'Letters' : 'Degrees'}</span>
+                    <span className="hidden sm:inline">{notationMode === NotationMode.LETTERS ? 'Letters' : 'Degrees'}</span>
                 </button>
               </>
             )}

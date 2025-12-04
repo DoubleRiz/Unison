@@ -1,3 +1,4 @@
+
 // Chromatic scale using Sharps for simplification
 export const CHROMATIC_SCALE = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -63,7 +64,7 @@ export const transposeContent = (content: string, semitones: number): string => 
   return content.replace(/\[(.*?)\]/g, (match, inner) => {
     // Check if it is a section header to avoid transposing "Chorus" to "Dhorus"
     // We check against common section names or if the inner text doesn't look like a chord
-    if (/^(Intro|Verse|Chorus|Refrain|Bridge|Pont|Pre-Chorus|Outro|Solo|Instrumental|Couplet)/i.test(inner)) {
+    if (/^(Intro|Verse|Chorus|Refrain|Bridge|Pont|Pre-Chorus|Outro|Solo|Instrumental|Couplet|Strophe)/i.test(inner)) {
        return match;
     }
 
@@ -139,7 +140,7 @@ export const convertToDegree = (chord: string, key: string): string => {
 export const getSectionType = (line: string): string | null => {
   const trimmed = line.trim();
   // Matches brackets containing common section names
-  const sectionRegex = /^\[(Intro|Verse|Chorus|Refrain|Bridge|Pont|Pre-Chorus|Outro|Solo|Instrumental|Couplet).*\]$/i;
+  const sectionRegex = /^\[(Intro|Verse|Chorus|Refrain|Bridge|Pont|Pre-Chorus|Outro|Solo|Instrumental|Couplet|Strophe).*\]$/i;
   const match = trimmed.match(sectionRegex);
   
   if (match) {
