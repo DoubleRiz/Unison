@@ -1,6 +1,7 @@
+
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { Music, ArrowRight, Loader2, User, X } from 'lucide-react';
+import { ArrowRight, Loader2, User, X, AudioWaveform } from 'lucide-react';
 
 interface AuthProps {
   onClose?: () => void;
@@ -48,72 +49,72 @@ const Auth: React.FC<AuthProps> = ({ onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-xl p-8 shadow-2xl relative">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4">
+      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
+        {/* Design Blobs */}
+        <div className="absolute top-[-10%] right-[-10%] w-32 h-32 bg-cyan-600/10 rounded-full blur-2xl pointer-events-none"></div>
+        <div className="absolute bottom-[-10%] left-[-10%] w-32 h-32 bg-purple-600/10 rounded-full blur-2xl pointer-events-none"></div>
+
         {onClose && (
           <button 
             onClick={onClose}
-            className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors"
+            className="absolute top-5 right-5 text-slate-500 hover:text-white transition-colors"
           >
             <X size={24} />
           </button>
         )}
 
-        <div className="text-center mb-8">
-          <div className="w-12 h-12 bg-cyan-600 rounded-xl flex items-center justify-center shadow-lg shadow-cyan-500/20 mx-auto mb-4">
-            <Music className="text-white" size={24} />
+        <div className="text-center mb-10 relative z-10">
+          <div className="w-16 h-16 bg-gradient-to-br from-cyan-500 via-cyan-600 to-purple-600 rounded-2xl flex items-center justify-center shadow-2xl shadow-cyan-500/30 mx-auto mb-6 transform -rotate-3">
+            <AudioWaveform className="text-white" size={32} />
           </div>
-          <h1 className="text-2xl font-bold text-white mb-1">ChordCraft</h1>
-          <p className="text-slate-400 text-sm">Sign in to create and save songs.</p>
+          <h1 className="text-4xl font-black tracking-tighter text-white mb-2 bg-gradient-to-r from-white via-white to-slate-400 bg-clip-text text-transparent italic">UNISON</h1>
+          <p className="text-slate-400 text-sm font-medium">Elevate your performance.</p>
         </div>
 
-        <form onSubmit={handleAuth} className="space-y-4">
-          <h2 className="text-lg font-bold text-white mb-4">
-            {mode === 'signin' ? 'Welcome back' : 'Create an account'}
-          </h2>
-
+        <form onSubmit={handleAuth} className="space-y-4 relative z-10">
           {mode === 'signup' && (
             <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Username</label>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-2 ml-1">Username</label>
               <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                 <input
                   type="text"
                   required
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-cyan-500 transition-colors"
-                  placeholder="jimi_hendrix"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-11 pr-4 py-3.5 text-white focus:outline-none focus:border-cyan-500 transition-all font-medium"
+                  placeholder="e.g. guitar_hero_99"
                 />
               </div>
             </div>
           )}
 
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Email</label>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2 ml-1">Email</label>
             <input
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-cyan-500 transition-colors"
-              placeholder="you@example.com"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3.5 text-white focus:outline-none focus:border-cyan-500 transition-all font-medium"
+              placeholder="musician@unison.com"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Password</label>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2 ml-1">Password</label>
             <input
               type="password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-cyan-500 transition-colors"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3.5 text-white focus:outline-none focus:border-cyan-500 transition-all font-medium"
               placeholder="••••••••"
             />
           </div>
 
           {message && (
-            <div className={`p-3 rounded-lg text-sm ${message.type === 'error' ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'}`}>
+            <div className={`p-4 rounded-xl text-sm font-medium ${message.type === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-green-500/10 text-green-400 border border-green-500/20'}`}>
               {message.text}
             </div>
           )}
@@ -121,25 +122,25 @@ const Auth: React.FC<AuthProps> = ({ onClose }) => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
+            className="w-full bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-500 hover:to-cyan-600 text-white font-bold py-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-xl shadow-cyan-900/20 active:scale-95 disabled:opacity-50"
           >
             {loading ? <Loader2 size={20} className="animate-spin" /> : (
               <>
-                {mode === 'signin' ? 'Sign In' : 'Sign Up'}
-                <ArrowRight size={18} />
+                {mode === 'signin' ? 'Unlock Account' : 'Create Stage Identity'}
+                <ArrowRight size={20} />
               </>
             )}
           </button>
         </form>
 
-        <div className="mt-6 text-center text-sm text-slate-500">
-          {mode === 'signin' ? "Don't have an account? " : "Already have an account? "}
+        <div className="mt-8 text-center text-sm text-slate-500 relative z-10 font-medium">
+          {mode === 'signin' ? "New to the band? " : "Already one of us? "}
           <button 
             onClick={() => {
               setMode(mode === 'signin' ? 'signup' : 'signin');
               setMessage(null);
             }} 
-            className="text-cyan-400 hover:text-cyan-300 font-medium"
+            className="text-cyan-400 hover:text-cyan-300 font-bold underline decoration-cyan-400/30 underline-offset-4"
           >
             {mode === 'signin' ? 'Sign up' : 'Sign in'}
           </button>
