@@ -2,8 +2,9 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Song, NotationMode } from '../types';
 import { transpose, convertToDegree, getSectionType, transposeContent } from '../utils/musicLogic';
-import { Music2, Heart, Trash2, AlertTriangle, Edit3, ZoomIn, ZoomOut, Mic, MicOff, Play, Pause, GitBranch, Shield, FileDown, StickyNote, ChevronDown, ChevronUp } from 'lucide-react';
+import { Music2, Heart, Trash2, AlertTriangle, Edit3, ZoomIn, ZoomOut, Mic, MicOff, Play, Pause, GitBranch, Shield, FileDown, StickyNote, ChevronDown, ChevronUp, FastForward, Rewind, Hash, Type } from 'lucide-react';
 import CommentsSection from './CommentsSection';
+import ChordTooltip from './ChordTooltip';
 import { jsPDF } from 'jspdf';
 
 interface SongSheetProps {
@@ -36,48 +37,87 @@ const SongSheet: React.FC<SongSheetProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   
   // View Settings
-  const [fontSize, setFontSize] = useState(1.125); // Default 1.125rem (text-lg)
+  const [fontSize, setFontSize] = useState(1.125); 
   const [showChords, setShowChords] = useState(true);
-  const [showNotes, setShowNotes] = useState(true);
 
-  // Auto Scroll State
+  // Auto Scroll State & Refs
   const [isScrolling, setIsScrolling] = useState(false);
-  const [scrollSpeed, setScrollSpeed] = useState(1); // 1 to 10
-  const scrollIntervalRef = useRef<number | null>(null);
+  const [scrollSpeed, setScrollSpeed] = useState(3); // Level 1 to 7 (Default 3)
+  const scrollingRef = useRef(isScrolling);
+  const speedRef = useRef(scrollSpeed);
+  const scrollPosRef = useRef(0); // High precision float position
+  const requestRef = useRef<number | null>(null);
+  const lastTimeRef = useRef<number | null>(null);
+
+  // Sync refs with state
+  useEffect(() => { scrollingRef.current = isScrolling; }, [isScrolling]);
+  useEffect(() => { speedRef.current = scrollSpeed; }, [scrollSpeed]);
 
   useEffect(() => {
-    // Sync local state with prop when song changes
     setIsFavorite(!!song.is_favorite);
     setIsScrolling(false);
   }, [song]);
 
-  // Handle Auto Scroll
-  useEffect(() => {
-    if (isScrolling) {
-      scrollIntervalRef.current = window.setInterval(() => {
-        // Try to find the scrollable parent
-        const scrollableParent = containerRef.current?.closest('.overflow-y-auto');
+  // Unified Auto Scroll Logic
+  const animateScroll = (time: number) => {
+    if (!scrollingRef.current) {
+      lastTimeRef.current = null;
+      return;
+    }
+
+    if (lastTimeRef.current !== null) {
+      const deltaTime = time - lastTimeRef.current;
+      const scrollableParent = containerRef.current?.closest('.overflow-y-auto') as HTMLElement;
+      
+      if (scrollableParent) {
+        // High precision math: speed * multiplier
+        // Level 1 = 0.15px per frame = ~9px/sec (very slow)
+        // Level 7 = 1.05px per frame = ~63px/sec
+        const move = (speedRef.current * 0.15) * (deltaTime / 16.7);
         
-        if (scrollableParent) {
-          scrollableParent.scrollBy(0, scrollSpeed * 0.5);
-          if (scrollableParent.scrollTop + scrollableParent.clientHeight >= scrollableParent.scrollHeight - 5) {
-             setIsScrolling(false);
-          }
-        } else {
-          window.scrollBy(0, scrollSpeed * 0.5);
-          if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 5) {
-             setIsScrolling(false);
-          }
+        // Accumulate in float ref
+        scrollPosRef.current += move;
+        
+        // Apply to integer scroll property
+        scrollableParent.scrollTop = scrollPosRef.current;
+
+        // Auto stop at the end
+        if (scrollableParent.scrollTop + scrollableParent.clientHeight >= scrollableParent.scrollHeight - 5) {
+          setIsScrolling(false);
+          scrollingRef.current = false;
+          return;
         }
-      }, 30);
+      }
+    }
+    
+    lastTimeRef.current = time;
+    requestRef.current = requestAnimationFrame(animateScroll);
+  };
+
+  useEffect(() => {
+    const scrollableParent = containerRef.current?.closest('.overflow-y-auto') as HTMLElement;
+    
+    if (isScrolling) {
+      if (scrollableParent) {
+        // Sync float ref with actual position before starting
+        scrollPosRef.current = scrollableParent.scrollTop;
+        scrollableParent.style.scrollBehavior = 'auto';
+      }
+      lastTimeRef.current = null;
+      requestRef.current = requestAnimationFrame(animateScroll);
     } else {
-      if (scrollIntervalRef.current) clearInterval(scrollIntervalRef.current);
+      if (scrollableParent) {
+        scrollableParent.style.scrollBehavior = 'smooth';
+      }
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+      }
     }
 
     return () => {
-      if (scrollIntervalRef.current) clearInterval(scrollIntervalRef.current);
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
-  }, [isScrolling, scrollSpeed]);
+  }, [isScrolling]);
 
   const toggleFavorite = async () => {
     if (!session || !onToggleFavorite) return;
@@ -124,10 +164,12 @@ const SongSheet: React.FC<SongSheetProps> = ({
     return transposedChord;
   };
 
-  const renderChordDisplay = (chordString: string | null) => {
+  const renderChordDisplay = (chordString: string | null, originalChord?: string | null) => {
     if (!chordString) return null;
     let content: React.ReactNode = chordString;
-    if (notationMode === NotationMode.DEGREES) {
+    const isDegree = notationMode === NotationMode.DEGREES;
+    
+    if (isDegree) {
       const match = chordString.match(/^([b#]?[1-7])(.*)$/);
       if (match) {
         content = (
@@ -138,7 +180,16 @@ const SongSheet: React.FC<SongSheetProps> = ({
         );
       }
     }
-    return <span className="whitespace-pre">{content}{'\u00A0'}{'\u00A0'}</span>;
+
+    const shapeChordName = originalChord ? transpose(originalChord, transposeSemitones) : chordString;
+
+    return (
+      <ChordTooltip chord={shapeChordName}>
+        <span className={`whitespace-pre cursor-help font-bold ${!isDegree ? 'text-cyan-600 dark:text-cyan-400' : ''}`}>
+          {content}{'\u00A0'}{'\u00A0'}
+        </span>
+      </ChordTooltip>
+    );
   };
 
   const renderStyledText = (text: string) => {
@@ -153,8 +204,6 @@ const SongSheet: React.FC<SongSheetProps> = ({
       return part;
     });
   };
-
-  const youtubeId = song.youtubeUrl ? (song.youtubeUrl.match(/^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/)?.[2] || null) : null;
 
   const adjustFontSize = (delta: number) => {
     setFontSize(prev => Math.max(0.7, Math.min(prev + delta, 4.0)));
@@ -209,9 +258,41 @@ const SongSheet: React.FC<SongSheetProps> = ({
       )}
 
       {/* Auto Scroll Floating Controls */}
-      <div className="fixed bottom-24 right-6 md:bottom-6 z-40 flex flex-col items-end gap-2 scale-90 md:scale-100">
-        <button onClick={() => setIsScrolling(!isScrolling)} className={`h-14 w-14 rounded-full shadow-lg flex items-center justify-center transition-all ${isScrolling ? 'bg-cyan-500 text-white animate-pulse' : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700'}`}>
-           {isScrolling ? <Pause size={24} /> : <Play size={24} />}
+      <div className="fixed bottom-24 right-6 md:bottom-10 md:right-10 z-40 flex flex-col items-end gap-3 scale-90 md:scale-100">
+        {isScrolling && (
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-3 shadow-xl animate-in slide-in-from-bottom-2 duration-300 min-w-[200px]">
+             <div className="flex flex-col gap-2">
+                <div className="flex justify-between items-center">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">Scroll Level</div>
+                  <div className="text-xs font-mono font-bold text-cyan-500 bg-cyan-500/10 px-2 py-0.5 rounded">Lvl {scrollSpeed}</div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input 
+                    type="range" 
+                    min="1" 
+                    max="7" 
+                    step="1" 
+                    value={scrollSpeed} 
+                    onChange={(e) => setScrollSpeed(parseInt(e.target.value))}
+                    className="flex-1 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-600"
+                  />
+                </div>
+             </div>
+          </div>
+        )}
+        
+        <button 
+          onClick={() => setIsScrolling(!isScrolling)} 
+          className={`h-16 w-16 rounded-full shadow-2xl flex items-center justify-center transition-all border-4 ${isScrolling ? 'bg-cyan-600 text-white border-cyan-400 scale-110' : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-transparent hover:border-slate-200 dark:hover:border-slate-600'}`}
+        >
+           {isScrolling ? (
+             <div className="relative">
+               <Pause size={32} />
+               <div className="absolute -inset-4 bg-cyan-400/20 rounded-full animate-ping"></div>
+             </div>
+           ) : (
+             <Play size={32} fill="currentColor" />
+           )}
         </button>
       </div>
 
@@ -285,14 +366,14 @@ const SongSheet: React.FC<SongSheetProps> = ({
                   if (isCurrentLineChords) {
                     return (
                       <div key={segIdx} className="flex">
-                        {chordString && showChords && <span className={`font-bold select-none text-cyan-600 dark:text-cyan-400`}>{renderChordDisplay(chordString)}</span>}
+                        {chordString && showChords && renderChordDisplay(chordString, segment.chord)}
                         <span className="whitespace-pre text-slate-500">{segment.lyrics}</span>
                       </div>
                     );
                   }
                   return (
                     <div key={segIdx} className="flex flex-col">
-                      {chordString && showChords && <div className={`font-bold text-[0.9em] leading-none select-none mb-1 text-cyan-600 dark:text-cyan-400`}>{renderChordDisplay(chordString)}</div>}
+                      {chordString && showChords && <div className="font-bold text-[0.9em] leading-none select-none mb-1 text-cyan-600 dark:text-cyan-400">{renderChordDisplay(chordString, segment.chord)}</div>}
                       <div className="text-slate-800 dark:text-slate-300 whitespace-pre leading-none">{renderStyledText(segment.lyrics)}</div>
                     </div>
                   );
