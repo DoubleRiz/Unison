@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Song, NotationMode } from './types';
 import { supabase } from './lib/supabaseClient';
@@ -15,28 +16,17 @@ import AdvancedSearch from './components/AdvancedSearch';
 import HelpPage from './components/HelpPage';
 import ChordDictionary from './components/tools/ChordDictionary';
 import ChordProgressions from './components/tools/ChordProgressions';
+import BottomNav from './components/BottomNav';
 import { 
   Minus, 
   Plus, 
   Hash, 
   Type, 
   Loader2, 
-  Globe, 
   PanelLeft, 
-  Settings, 
-  List, 
-  Users, 
-  Edit3,
   ListMusic,
-  AlertTriangle,
-  Filter,
-  ChevronLeft,
-  Music,
-  ShieldQuestion,
-  Grid3X3,
-  BookOpen,
-  Sun,
-  Moon
+  Lock,
+  ArrowRight
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -53,15 +43,14 @@ const App: React.FC = () => {
   // Navigation & UI State
   const [currentSongId, setCurrentSongId] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<'landing' | 'main' | 'editor' | 'profile' | 'setlists' | 'groups' | 'search' | 'help' | 'chord-dictionary' | 'progressions'>('landing'); 
+  const [initialSearchQuery, setInitialSearchQuery] = useState('');
   const [transpose, setTranspose] = useState(0);
   const [notationMode, setNotationMode] = useState<NotationMode>(NotationMode.LETTERS);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  
+  // Responsive State
+  const [isMobile, setIsMobile] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-
-  // Duplicate Resolution State
-  const [showConflictModal, setShowConflictModal] = useState(false);
-  const [conflictSongData, setConflictSongData] = useState<Song | null>(null);
-  const [editorTemplate, setEditorTemplate] = useState<Song | null>(null);
 
   // Apply Theme Effect
   useEffect(() => {
@@ -75,41 +64,37 @@ const App: React.FC = () => {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
   };
 
-  // Responsive: Close sidebar by default on mobile load
   useEffect(() => {
     const handleResize = () => {
-      if (window.innerWidth < 768) {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) {
         setIsSidebarOpen(false);
+      } else {
+        // Desktop default: sidebar stays open
+        setIsSidebarOpen(true);
       }
     };
-    handleResize(); // Init
+    handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // 1. Manage Auth Session
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) {
-        setCurrentView('main');
-      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) {
         setShowAuthModal(false);
-        if (currentView === 'landing') setCurrentView('main');
-      } else {
-        setCurrentView('landing');
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // 2. Use Custom Hook for Data
   const { 
     songs, 
     setSongs, 
@@ -117,15 +102,12 @@ const App: React.FC = () => {
     pendingInvitesCount, 
     loading, 
     publicSongData, 
-    isAdmin,
-    fetchSongs 
+    isAdmin 
   } = useAppData(session, currentView, currentSongId);
 
   const handleToggleFavorite = async (songId: string, isFav: boolean) => {
     if (!session) return;
-    
     setSongs(prev => prev.map(s => s.id === songId ? { ...s, is_favorite: isFav } : s));
-    
     if (isFav) {
       await supabase.from('favorites').insert({ user_id: session.user.id, song_id: songId });
     } else {
@@ -133,28 +115,19 @@ const App: React.FC = () => {
     }
   };
 
+  const handleRandomSong = () => {
+    if (songs.length === 0) return;
+    const randomIndex = Math.floor(Math.random() * songs.length);
+    const randomSong = songs[randomIndex];
+    setCurrentSongId(randomSong.id);
+    setCurrentView('main');
+    setTranspose(0);
+  };
+
   const handleSaveSong = async (songData: Song) => {
     if (!session) return;
-    
-    // Check for Duplicates
-    const duplicates = songs.find(s => 
-      s.title.trim().toLowerCase() === songData.title.trim().toLowerCase() && 
-      s.artist.trim().toLowerCase() === songData.artist.trim().toLowerCase() &&
-      s.id !== songData.id // Don't count self if editing
-    );
-
-    if (duplicates && !conflictSongData) {
-      setConflictSongData(songData);
-      setShowConflictModal(true);
-      return;
-    }
-
-    setConflictSongData(null);
-    setShowConflictModal(false);
-
     try {
       const isNew = !songs.find(s => s.id === songData.id);
-
       const dbSong: any = {
         title: songData.title,
         artist: songData.artist,
@@ -169,42 +142,22 @@ const App: React.FC = () => {
         genres: songData.genres,
         tags: songData.tags
       };
-
       if (isNew) {
         dbSong.user_id = session.user.id;
         dbSong.forked_from = songData.forked_from;
-
-        const { data, error } = await supabase
-          .from('songs')
-          .insert([dbSong])
-          .select()
-          .single();
-          
+        const { data, error } = await supabase.from('songs').insert([dbSong]).select().single();
         if (error) throw error;
-        
         const newSong: Song = { ...songData, id: data.id, user_id: session.user.id, is_favorite: false };
         setSongs([newSong, ...songs]);
         setCurrentSongId(data.id);
-        if (editorTemplate) setEditorTemplate(null);
       } else {
-        const { error } = await supabase
-          .from('songs')
-          .update(dbSong)
-          .eq('id', songData.id);
-          
+        const { error } = await supabase.from('songs').update(dbSong).eq('id', songData.id);
         if (error) throw error;
-
-        setSongs(songs.map(s => s.id === songData.id ? { 
-          ...songData, 
-          user_id: s.user_id || session.user.id, 
-          is_favorite: s.is_favorite 
-        } : s));
+        setSongs(songs.map(s => s.id === songData.id ? { ...songData, user_id: s.user_id || session.user.id, is_favorite: s.is_favorite } : s));
       }
-      
       setCurrentView('main');
     } catch (error: any) {
       console.error('Error saving song:', error.message);
-      alert('Error saving song: ' + error.message);
     }
   };
 
@@ -213,13 +166,11 @@ const App: React.FC = () => {
      try {
        const { error } = await supabase.from('songs').delete().eq('id', id);
        if (error) throw error;
-       
        setSongs(songs.filter(s => s.id !== id));
        setCurrentSongId(null);
        setCurrentView('main');
      } catch(e: any) {
        console.error("Delete error:", e.message);
-       alert("Failed to delete song.");
      }
   };
 
@@ -233,7 +184,6 @@ const App: React.FC = () => {
       setShowAuthModal(true);
       return;
     }
-    setEditorTemplate(null);
     setCurrentSongId(null);
     setCurrentView('editor');
   };
@@ -248,22 +198,44 @@ const App: React.FC = () => {
     return Array.from(tags).sort();
   }, [songs]);
 
-  // Determine which song to show
   const currentSong = session 
     ? (songs.find(s => s.id === currentSongId) || null)
     : publicSongData;
 
-  // Render Main Content
+  const AuthRequiredState = ({ title, desc }: { title: string, desc: string }) => (
+    <div className="h-full flex flex-col items-center justify-center p-6 text-center relative overflow-hidden bg-white dark:bg-slate-950">
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-cyan-500/10 blur-[100px] rounded-full"></div>
+      <div className="relative z-10 max-w-sm">
+        <div className="w-20 h-20 bg-slate-100 dark:bg-slate-900 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-xl border border-slate-200 dark:border-slate-800">
+          <Lock className="text-cyan-500" size={32} />
+        </div>
+        <h2 className="text-3xl font-black text-slate-900 dark:text-white mb-4 tracking-tight">{title}</h2>
+        <p className="text-slate-500 dark:text-slate-400 mb-10 leading-relaxed font-medium">
+          {desc}
+        </p>
+        <button 
+          onClick={() => setShowAuthModal(true)}
+          className="w-full flex items-center justify-center gap-2 px-8 py-4 bg-cyan-600 hover:bg-cyan-500 text-white rounded-2xl font-bold transition-all shadow-lg shadow-cyan-900/20 active:scale-95"
+        >
+          Unlock with Account <ArrowRight size={20} />
+        </button>
+      </div>
+    </div>
+  );
+
   const renderMainContent = () => {
-    if (currentView === 'landing' && session) {
+    if (currentView === 'landing') {
       return (
         <LandingPage 
+          onNavigate={(view, query) => {
+            if (query) setInitialSearchQuery(query);
+            setCurrentView(view as any);
+          }}
           onSelectSong={(id) => { 
             setCurrentSongId(id); 
             setCurrentView('main'); 
             setTranspose(0);
           }} 
-          onNavigateToAdvancedSearch={() => setCurrentView('search')}
         />
       );
     }
@@ -284,56 +256,54 @@ const App: React.FC = () => {
       return (
         <AdvancedSearch
           session={session}
+          initialQuery={initialSearchQuery}
           onSelectSong={(id) => {
             setCurrentSongId(id);
             setCurrentView('main');
             setTranspose(0);
+            setInitialSearchQuery(''); 
           }}
         />
       );
     }
 
-    if (currentView === 'profile' && session) {
-      return <Profile user={session.user} songs={songs} />;
+    if (currentView === 'profile') {
+      return session ? <Profile user={session.user} songs={songs} /> : <AuthRequiredState title="Member Area" desc="Create an account to manage your profile, track your repertoire and sync across devices." />;
     }
 
-    if (currentView === 'setlists' && session) {
-      return (
+    if (currentView === 'setlists') {
+      return session ? (
         <SetlistEditor 
           user={session.user} 
           allSongs={songs} 
           groups={groups}
-          onBack={() => setCurrentView('main')} 
+          onBack={() => setCurrentView('landing')} 
         />
-      );
+      ) : <AuthRequiredState title="Gig Planner" desc="Join the community to create professional setlists, organize your performances and collaborate with your band." />;
     }
 
-    if (currentView === 'groups' && session) {
-      return (
+    if (currentView === 'groups') {
+      return session ? (
         <GroupManager 
           user={session.user}
-          onClose={() => setCurrentView('main')}
+          onClose={() => setCurrentView('landing')}
         />
-      );
+      ) : <AuthRequiredState title="Collaboration Hub" desc="Connect with your fellow musicians. Create bands, share arrangements and plan rehearsals together." />;
     }
 
-    if (currentView === 'editor' && session) {
-      return (
+    if (currentView === 'editor') {
+      return session ? (
         <SongEditor 
-          key={currentSongId || (editorTemplate ? 'fork' : 'new')}
-          initialSong={currentSongId ? currentSong : editorTemplate} 
+          key={currentSongId || 'new'}
+          initialSong={currentSongId ? currentSong : null} 
           groups={groups}
           existingTags={allExistingTags}
           onSave={handleSaveSong} 
           onCancel={() => {
-            setEditorTemplate(null);
             setCurrentView('main');
-            if (!currentSongId && songs.length > 0) {
-                setCurrentSongId(songs[0].id);
-            }
           }}
         />
-      );
+      ) : <AuthRequiredState title="Song Editor" desc="Please sign in to create and edit professional song sheets in your private library." />;
     }
 
     if (currentSong) {
@@ -352,31 +322,10 @@ const App: React.FC = () => {
       );
     }
 
-    if (!session) return (
-       <LandingPage 
-         onSelectSong={(id) => { setCurrentSongId(id); setCurrentView('main'); }} 
-         onNavigateToAdvancedSearch={() => setCurrentView('search')}
-       />
-    );
-
     return (
       <div className="h-full flex flex-col items-center justify-center text-slate-500">
         <ListMusic size={64} className="mb-4 opacity-20" />
-        <p className="text-lg">Select a song or create a new one.</p>
-        <div className="flex gap-4 mt-6">
-          <button 
-            onClick={() => setCurrentView('landing')}
-            className="px-4 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm text-cyan-400 hover:bg-slate-800 transition-colors flex items-center gap-2"
-          >
-            <Globe size={16} /> Browse Community
-          </button>
-          <button 
-            onClick={() => setCurrentView('search')}
-            className="px-4 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm text-purple-400 hover:bg-slate-800 transition-colors flex items-center gap-2"
-          >
-            <Filter size={16} /> Advanced Library
-          </button>
-        </div>
+        <p className="text-lg">Select a song to start.</p>
       </div>
     );
   };
@@ -389,230 +338,107 @@ const App: React.FC = () => {
     );
   }
 
-  // GUEST / LANDING VIEW
-  if (!session) {
-    return (
-      <div className="bg-slate-50 dark:bg-slate-950 min-h-screen font-sans text-slate-900 dark:text-slate-200 transition-colors duration-300">
-        <Navbar 
-          session={null} 
-          theme={theme}
-          toggleTheme={toggleTheme}
-          onOpenAuth={() => setShowAuthModal(true)} 
-          onSignOut={() => {}}
-          onNavigateHome={() => setCurrentView('landing')}
-          onNavigateProfile={() => {}}
-          onNavigateHelp={() => setCurrentView('help')}
-          onNavigateDictionary={() => setCurrentView('chord-dictionary')}
-          onNavigateProgressions={() => setCurrentView('progressions')}
-        />
-        {showAuthModal && <Auth onClose={() => setShowAuthModal(false)} />}
-
-        {currentView === 'landing' ? (
-          <LandingPage 
-            onSelectSong={(id) => { 
-              setCurrentSongId(id); 
-              setCurrentView('main'); 
-              setTranspose(0);
-            }} 
-            onNavigateToAdvancedSearch={() => setCurrentView('search')}
-          />
-        ) : currentView === 'help' ? (
-           <div className="max-w-6xl mx-auto p-4 md:p-6 min-h-[calc(100vh-64px)]">
-             <HelpPage onBack={() => setCurrentView('landing')} />
-           </div>
-        ) : currentView === 'chord-dictionary' ? (
-           <ChordDictionary />
-        ) : currentView === 'progressions' ? (
-           <ChordProgressions />
-        ) : currentView === 'search' ? (
-           <AdvancedSearch
-             session={null}
-             onSelectSong={(id) => {
-               setCurrentSongId(id);
-               setCurrentView('main');
-               setTranspose(0);
-             }}
-           />
-        ) : (
-          <div className="max-w-6xl mx-auto p-4 md:p-6 min-h-[calc(100vh-64px)]">
-             {/* Sticky Sub-header for tools */}
-             <div className="mb-6 flex flex-wrap justify-between items-center sticky top-16 z-20 bg-white/95 dark:bg-slate-950/95 py-4 border-b border-slate-200 dark:border-slate-800/50 -mx-4 md:-mx-6 px-4 md:px-6 gap-2">
-                <button onClick={() => setCurrentView('landing')} className="text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-white flex items-center gap-2 text-sm md:text-base transition-colors">
-                   <ChevronLeft size={20} /> Back
-                </button>
-                {currentSong && (
-                   <div className="flex items-center gap-3">
-                     <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-900 p-1.5 rounded-lg border border-slate-200 dark:border-slate-800">
-                        <button onClick={() => changeTranspose(-1)} className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 rounded text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-white">
-                          <Minus size={16} />
-                        </button>
-                        <span className="w-8 md:w-10 text-center text-cyan-600 dark:text-cyan-400 font-mono font-bold text-sm">{transpose > 0 ? `+${transpose}` : transpose}</span>
-                        <button onClick={() => changeTranspose(1)} className="p-1 hover:bg-slate-200 dark:hover:bg-slate-800 rounded text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-white">
-                          <Plus size={16} />
-                        </button>
-                     </div>
-                     
-                     <button 
-                        onClick={() => setNotationMode(m => m === NotationMode.LETTERS ? NotationMode.DEGREES : NotationMode.LETTERS)}
-                        className="flex items-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-cyan-600 dark:hover:text-white transition-colors"
-                      >
-                         {notationMode === NotationMode.LETTERS ? <Hash size={18} /> : <Type size={18} />}
-                         <span className="hidden sm:inline">{notationMode === NotationMode.LETTERS ? 'Letters' : 'Degrees'}</span>
-                      </button>
-                   </div>
-                )}
-             </div>
-             {renderMainContent()}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // CONNECTED VIEW
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-200 font-sans overflow-hidden transition-colors duration-300">
       
-      {showConflictModal && conflictSongData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 max-w-md w-full shadow-2xl">
-            <div className="flex flex-col items-center text-center mb-6">
-              <div className="w-12 h-12 bg-yellow-100 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-500 rounded-full flex items-center justify-center mb-4">
-                <AlertTriangle size={24} />
-              </div>
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Duplicate Song Detected</h3>
-              <p className="text-slate-500 dark:text-slate-400 text-sm mb-4">
-                You already have a song named <span className="text-slate-900 dark:text-white font-medium">"{conflictSongData.title}"</span> by <span className="text-slate-900 dark:text-white font-medium">{conflictSongData.artist}</span>.
-              </p>
-            </div>
-            <div className="flex flex-col gap-2">
-              <button 
-                onClick={() => { setShowConflictModal(false); setConflictSongData(null); }}
-                className="w-full px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white rounded-lg text-sm font-medium transition-colors"
-              >
-                Back to Editor
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Mobile Sidebar Overlay */}
-      {isSidebarOpen && (
-        <div 
-          className="md:hidden fixed inset-0 bg-black/50 z-30 backdrop-blur-sm"
-          onClick={() => setIsSidebarOpen(false)}
+      {showAuthModal && <Auth onClose={() => setShowAuthModal(false)} />}
+      
+      {!isMobile && (
+        <Sidebar 
+          session={session}
+          songs={songs}
+          groups={groups}
+          pendingInvitesCount={pendingInvitesCount}
+          currentSongId={currentSongId}
+          currentView={currentView}
+          isSidebarOpen={isSidebarOpen}
+          onCloseMobile={() => {}}
+          onNavigate={setCurrentView}
+          onSelectSong={(id) => {
+            setCurrentSongId(id);
+            setCurrentView('main');
+            setTranspose(0);
+          }}
+          onSignOut={handleSignOut}
+          onOpenAuth={() => setShowAuthModal(true)}
+          onCreateSong={createNewSong}
         />
       )}
 
-      <Sidebar 
-        session={session}
-        songs={songs}
-        groups={groups}
-        pendingInvitesCount={pendingInvitesCount}
-        currentSongId={currentSongId}
-        currentView={currentView}
-        isSidebarOpen={isSidebarOpen}
-        onCloseMobile={() => {
-           if (window.innerWidth < 768) setIsSidebarOpen(false);
-        }}
-        onNavigate={setCurrentView}
-        onSelectSong={(id) => {
-          setCurrentSongId(id);
-          setCurrentView('main');
-          setTranspose(0);
-        }}
-        onSignOut={handleSignOut}
-        onCreateSong={createNewSong}
-      />
+      <main className="flex-1 flex flex-col h-full relative min-w-0 bg-white dark:bg-slate-950 transition-colors duration-300">
+        <Navbar 
+          session={session}
+          songs={songs}
+          theme={theme}
+          toggleTheme={toggleTheme}
+          onOpenAuth={() => setShowAuthModal(true)}
+          onSignOut={handleSignOut}
+          onNavigateHome={() => { setCurrentView('landing'); setCurrentSongId(null); }}
+          onNavigateProfile={() => setCurrentView('profile')}
+          onNavigateSetlists={() => setCurrentView('setlists')}
+          onRandomSong={handleRandomSong}
+          onSelectSong={(id) => {
+            setCurrentSongId(id);
+            setCurrentView('main');
+            setTranspose(0);
+          }}
+        />
 
-      <main className="flex-1 flex flex-col h-full relative w-full bg-white dark:bg-slate-950 transition-colors duration-300">
-        <header className="h-16 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 md:px-6 sticky top-0 z-20 shrink-0">
-          
-          {/* ZONE GAUCHE : Navigation & Titres */}
-          <div className="flex items-center gap-3 md:gap-4 overflow-hidden">
-            <button
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className={`p-2 rounded-lg transition-colors flex-shrink-0 ${!isSidebarOpen ? 'text-cyan-600 dark:text-white bg-slate-100 dark:bg-slate-800' : 'text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}
-            >
-              <PanelLeft size={20} />
-            </button>
+        <header className="h-12 bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 md:px-6 sticky top-0 z-20 shrink-0">
+          <div className="flex items-center gap-3">
+            {!isMobile && (
+              <button
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                className="p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <PanelLeft size={18} />
+              </button>
+            )}
             
-            <div className="truncate">
-              {currentView === 'landing' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><Globe size={20} className="text-cyan-500 shrink-0" /> <span className="hidden sm:inline">Community Library</span><span className="sm:hidden">Community</span></h2>}
-              {currentView === 'search' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><Filter size={20} className="text-purple-500 shrink-0" /> <span className="hidden sm:inline">Advanced Library</span><span className="sm:hidden">Library</span></h2>}
-              {currentView === 'help' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><ShieldQuestion size={20} className="text-cyan-500 shrink-0" /> Help</h2>}
-              {currentView === 'chord-dictionary' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><Grid3X3 size={20} className="text-cyan-500 shrink-0" /> Chords</h2>}
-              {currentView === 'progressions' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><BookOpen size={20} className="text-purple-500 shrink-0" /> Progressions</h2>}
-              
-              {currentView === 'main' && currentSong && (
-                <div className="hidden md:flex items-center gap-2 text-slate-500 text-sm">
-                    <Music size={16} />
-                    <span className="font-medium">Now Playing</span>
-                </div>
-              )}
-              
-              {currentView === 'profile' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><Settings size={20} className="text-slate-400 shrink-0" /> Settings</h2>}
-              {currentView === 'setlists' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><List size={20} className="text-slate-400 shrink-0" /> <span className="hidden sm:inline">Setlist Manager</span><span className="sm:hidden">Setlists</span></h2>}
-              {currentView === 'groups' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><Users size={20} className="text-slate-400 shrink-0" /> <span className="hidden sm:inline">Group Manager</span><span className="sm:hidden">Groups</span></h2>}
-              {currentView === 'editor' && <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 truncate"><Edit3 size={20} className="text-slate-400 shrink-0" /> Editor</h2>}
+            <div className="text-xs font-bold text-slate-500 uppercase tracking-widest truncate max-w-[150px] md:max-w-none">
+              {currentView === 'landing' && "Home"}
+              {currentView === 'search' && "Library"}
+              {currentView === 'main' && currentSong?.title}
+              {currentView === 'editor' && "Editor"}
+              {currentView === 'setlists' && "Setlists"}
+              {currentView === 'groups' && "Groups"}
+              {currentView === 'profile' && "Profile"}
             </div>
           </div>
 
-          {/* ZONE DROITE : Outils */}
-          <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
-             {/* Theme Toggle in Dashboard */}
-             <button
-              onClick={toggleTheme}
-              className="p-2 text-slate-400 hover:text-yellow-600 dark:hover:text-yellow-400 transition-colors"
-              title="Toggle Theme"
-             >
-               {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-             </button>
-
-             <button 
-                onClick={() => setCurrentView('help')}
-                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-white transition-colors"
-                title="Help"
-              >
-                <ShieldQuestion size={20} />
-              </button>
-             
+          <div className="flex items-center gap-2">
             {currentView === 'main' && currentSong && (
-              <>
-                <div className="h-8 w-px bg-slate-200 dark:bg-slate-800 mx-1 hidden sm:block"></div>
-                
-                <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-1 border border-slate-200 dark:border-slate-700 shadow-sm">
-                  <button onClick={() => changeTranspose(-1)} className="p-1.5 md:p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-white transition-colors"><Minus size={16} /></button>
-                  <div className="w-10 md:w-16 text-center font-mono font-bold text-cyan-600 dark:text-cyan-400 text-sm">{transpose > 0 ? `+${transpose}` : transpose}</div>
-                  <button onClick={() => changeTranspose(1)} className="p-1.5 md:p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-white transition-colors"><Plus size={16} /></button>
+              <div className="flex items-center gap-1 md:gap-2 scale-90 md:scale-100">
+                <div className="flex items-center bg-slate-200 dark:bg-slate-800 rounded-md p-0.5 border border-slate-300 dark:border-slate-700">
+                  <button onClick={() => changeTranspose(-1)} className="p-1 hover:bg-slate-300 dark:hover:bg-slate-700 rounded text-slate-600 dark:text-slate-400"><Minus size={14} /></button>
+                  <div className="px-2 font-mono font-bold text-cyan-600 dark:text-cyan-400 text-[10px] md:text-xs">{transpose > 0 ? `+${transpose}` : transpose}</div>
+                  <button onClick={() => changeTranspose(1)} className="p-1 hover:bg-slate-300 dark:hover:bg-slate-700 rounded text-slate-600 dark:text-slate-400"><Plus size={14} /></button>
                 </div>
-                
-                <div className="h-8 w-px bg-slate-200 dark:bg-slate-800 mx-1 hidden sm:block"></div>
-                
                 <button 
                   onClick={() => setNotationMode(m => m === NotationMode.LETTERS ? NotationMode.DEGREES : NotationMode.LETTERS)}
-                  className={`flex items-center gap-2 px-2 md:px-3 py-2 rounded-lg border transition-all ${
-                    notationMode === NotationMode.DEGREES 
-                      ? 'bg-purple-100 dark:bg-purple-900/30 border-purple-300 dark:border-purple-500/50 text-purple-600 dark:text-purple-300' 
-                      : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-cyan-600 dark:hover:text-white'
-                  }`}
-                  title="Toggle Notation Mode"
+                  className="p-1.5 rounded-md border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
                 >
-                    {notationMode === NotationMode.LETTERS ? <Hash size={18} /> : <Type size={18} />}
-                    <span className="hidden sm:inline">{notationMode === NotationMode.LETTERS ? 'Letters' : 'Degrees'}</span>
+                  {notationMode === NotationMode.LETTERS ? <Hash size={14} /> : <Type size={14} />}
                 </button>
-              </>
+              </div>
             )}
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth w-full">
-          {renderMainContent()}
+        <div className={`flex-1 overflow-y-auto scroll-smooth w-full pb-20 md:pb-6 ${currentView !== 'landing' ? 'px-4 sm:px-8 md:px-10 lg:px-16' : ''}`}>
+          <div className={currentView !== 'landing' ? 'max-w-[1600px] mx-auto py-6 md:py-10' : ''}>
+            {renderMainContent()}
+          </div>
         </div>
+
+        {isMobile && (
+          <BottomNav 
+            currentView={currentView} 
+            onNavigate={setCurrentView} 
+            pendingInvitesCount={pendingInvitesCount} 
+          />
+        )}
       </main>
-      
-      {showAuthModal && <Auth onClose={() => setShowAuthModal(false)} />}
     </div>
   );
 };

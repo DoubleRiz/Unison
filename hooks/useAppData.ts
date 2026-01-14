@@ -11,14 +11,14 @@ export const useAppData = (session: any, currentView: string, currentSongId: str
   const [publicSongData, setPublicSongData] = useState<Song | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Fetch Public Song (Guest Mode)
+  // Fetch Public Song Details (Single)
   useEffect(() => {
     if (currentView === 'main' && currentSongId && !session) {
-      fetchPublicSong(currentSongId);
+      fetchPublicSongDetails(currentSongId);
     }
   }, [currentSongId, currentView, session]);
 
-  const fetchPublicSong = async (id: string) => {
+  const fetchPublicSongDetails = async (id: string) => {
     setLoading(true);
     const { data, error } = await supabase
       .from('songs')
@@ -36,7 +36,7 @@ export const useAppData = (session: any, currentView: string, currentSongId: str
         bpm: data.bpm,
         key: data.original_key,
         content: data.content,
-        notes: data.notes, // Added notes mapping
+        notes: data.notes,
         youtubeUrl: data.youtube_url,
         audioUrl: data.audio_url,
         is_public: data.is_public,
@@ -49,7 +49,6 @@ export const useAppData = (session: any, currentView: string, currentSongId: str
     setLoading(false);
   };
 
-  // Fetch User Data (Connected Mode)
   const fetchGroups = useCallback(async () => {
     if (!session) return;
     const { data, error } = await supabase
@@ -79,25 +78,29 @@ export const useAppData = (session: any, currentView: string, currentSongId: str
   }, [session]);
 
   const fetchSongs = useCallback(async () => {
-    if (!session) return;
     try {
-      // 1. Fetch Songs
-      const { data: songsData, error: songsError } = await supabase
-        .from('songs')
-        .select('*')
-        .order('updated_at', { ascending: false });
+      let query = supabase.from('songs').select('*');
 
+      if (session) {
+        // Logged in: fetch everything accessible
+        query = query.order('updated_at', { ascending: false });
+      } else {
+        // Guest: fetch top public songs for search/random functionality
+        query = query.eq('is_public', true).order('created_at', { ascending: false }).limit(50);
+      }
+
+      const { data: songsData, error: songsError } = await query;
       if (songsError) throw songsError;
 
-      // 2. Fetch Favorites
-      const { data: favData, error: favError } = await supabase
-        .from('favorites')
-        .select('song_id')
-        .eq('user_id', session.user.id);
-        
-      if (favError) throw favError;
-      
-      const favoriteIds = new Set(favData?.map((f: any) => f.song_id));
+      // Fetch Favorites only if logged in
+      let favoriteIds = new Set();
+      if (session) {
+        const { data: favData } = await supabase
+          .from('favorites')
+          .select('song_id')
+          .eq('user_id', session.user.id);
+        if (favData) favoriteIds = new Set(favData.map((f: any) => f.song_id));
+      }
 
       if (songsData) {
         const mappedSongs: Song[] = songsData.map((s: any) => ({
@@ -108,7 +111,7 @@ export const useAppData = (session: any, currentView: string, currentSongId: str
           bpm: s.bpm,
           key: s.original_key,
           content: s.content,
-          notes: s.notes, // Added notes mapping
+          notes: s.notes,
           youtubeUrl: s.youtube_url,
           audioUrl: s.audio_url, 
           is_public: s.is_public,
@@ -126,14 +129,12 @@ export const useAppData = (session: any, currentView: string, currentSongId: str
 
   // Initial Fetch
   useEffect(() => {
+    fetchSongs();
     if (session) {
-      fetchSongs();
       fetchGroups();
       fetchUserProfile();
-      setLoading(false);
-    } else {
-      setLoading(false);
     }
+    setLoading(false);
   }, [session, fetchSongs, fetchGroups, fetchUserProfile]);
 
   return {

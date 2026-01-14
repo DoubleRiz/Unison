@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Song, Setlist, NotationMode, Group } from '../types';
 import { supabase } from '../lib/supabaseClient';
@@ -20,11 +21,14 @@ import {
   User,
   AlertTriangle,
   Hash,
-  Type
+  Type,
+  Heart
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import SongSheet from './SongSheet';
 import { transposeContent, transpose } from '../utils/musicLogic';
+
+const FAVORITES_ID = 'virtual_favorites';
 
 interface SetlistEditorProps {
   user: any;
@@ -34,7 +38,7 @@ interface SetlistEditorProps {
 }
 
 interface SetlistItem {
-  id: string; // ID from setlist_songs table
+  id: string; // ID from setlist_songs table or song_id for virtuals
   song: Song;
   transpose: number;
 }
@@ -84,8 +88,6 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
 
   const fetchSetlists = async () => {
     setLoading(true);
-    // Fetch setlists where user is owner OR setlist belongs to a group user is member of
-    // Note: RLS handles the security, we just select *
     const { data, error } = await supabase
       .from('setlists')
       .select('*')
@@ -98,6 +100,18 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   };
 
   const fetchSetlistItems = async (setlistId: string) => {
+    if (setlistId === FAVORITES_ID) {
+      const favorites = allSongs
+        .filter(s => s.is_favorite)
+        .map(song => ({
+          id: `fav_${song.id}`,
+          song: song,
+          transpose: 0
+        }));
+      setSetlistItems(favorites);
+      return;
+    }
+
     const { data, error } = await supabase
       .from('setlist_songs')
       .select('*')
@@ -147,7 +161,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   };
 
   const handleUpdateSetlistTitle = async () => {
-    if (!currentSetlist || !editTitleValue.trim()) return;
+    if (!currentSetlist || currentSetlist.id === FAVORITES_ID || !editTitleValue.trim()) return;
     
     const { error } = await supabase
       .from('setlists')
@@ -163,6 +177,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
 
   const confirmDeleteSetlist = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (id === FAVORITES_ID) return;
     setSetlistToDelete(id);
     setShowDeleteModal(true);
   };
@@ -170,6 +185,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   const executeDeleteSetlist = async () => {
     if (!setlistToDelete) return;
     
+    // Correctly use the setSetlistToDelete setter instead of calling the state value itself.
     await supabase.from('setlists').delete().eq('id', setlistToDelete);
     setSetlists(setlists.filter(s => s.id !== setlistToDelete));
     if (currentSetlist?.id === setlistToDelete) setCurrentSetlist(null);
@@ -185,7 +201,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   };
 
   const addSongToSetlist = async (song: Song) => {
-    if (!currentSetlist) return;
+    if (!currentSetlist || currentSetlist.id === FAVORITES_ID) return;
 
     if (setlistItems.find(item => item.song.id === song.id)) {
       alert("Song already in setlist");
@@ -214,6 +230,8 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   };
 
   const removeSongFromSetlist = async (itemId: string) => {
+    if (currentSetlist?.id === FAVORITES_ID) return;
+    
     await supabase
       .from('setlist_songs')
       .delete()
@@ -227,23 +245,27 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
       item.id === itemId ? { ...item, transpose: newTranspose } : item
     ));
 
-    await supabase
-      .from('setlist_songs')
-      .update({ transpose: newTranspose })
-      .eq('id', itemId);
+    if (currentSetlist?.id !== FAVORITES_ID) {
+      await supabase
+        .from('setlist_songs')
+        .update({ transpose: newTranspose })
+        .eq('id', itemId);
+    }
   };
 
-  // Drag and Drop Handlers
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, position: number) => {
+    if (currentSetlist?.id === FAVORITES_ID) return;
     dragItem.current = position;
     e.currentTarget.classList.add('opacity-50');
   };
 
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>, position: number) => {
+    if (currentSetlist?.id === FAVORITES_ID) return;
     dragOverItem.current = position;
   };
 
   const handleDragEnd = async (e: React.DragEvent<HTMLDivElement>) => {
+    if (currentSetlist?.id === FAVORITES_ID) return;
     e.currentTarget.classList.remove('opacity-50');
     if (!currentSetlist || dragItem.current === null || dragOverItem.current === null) return;
     if (dragItem.current === dragOverItem.current) return;
@@ -290,20 +312,17 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
       
       const song = item.song;
       
-      // Header
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(150);
       doc.text(pdfTitle, margin, 10);
       doc.text(`Page ${index + 1}/${setlistItems.length}`, pageWidth - margin, 10, { align: 'right' });
 
-      // Title
       doc.setFontSize(24);
       doc.setTextColor(0);
       doc.setFont("helvetica", "bold");
       doc.text(song.title, margin, 25);
       
-      // Metadata
       doc.setFontSize(12);
       doc.setFont("helvetica", "normal");
       const keyText = item.transpose !== 0 
@@ -312,7 +331,6 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
         
       doc.text(`${song.artist} • ${keyText}${song.bpm ? ` • ${song.bpm} BPM` : ''}`, margin, 32);
       
-      // Content Processing
       doc.setFont("courier", "normal"); 
       doc.setFontSize(11);
       
@@ -363,7 +381,13 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     doc.save(`${pdfTitle}.pdf`);
   };
 
-  // Performance View
+  const favoriteSetlist: Setlist = {
+    id: FAVORITES_ID,
+    user_id: user.id,
+    title: 'My Favorites',
+    created_at: new Date().toISOString()
+  };
+
   if (performanceMode && currentSetlist) {
     const currentItem = setlistItems[performanceIndex];
     return (
@@ -417,7 +441,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
              <SongSheet 
                song={currentItem.song} 
                transposeSemitones={currentItem.transpose} 
-               notationMode={notationMode} // PASSING THE MODE HERE
+               notationMode={notationMode}
              />
            </div>
         </div>
@@ -425,9 +449,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     );
   }
 
-  // View: List of Setlists
   if (!currentSetlist) {
-    // Group setlists for display
     const personalSetlists = setlists.filter(s => !s.group_id);
     const groupSetlists = groups.map(g => ({
       group: g,
@@ -436,7 +458,6 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
 
     return (
       <div className="max-w-4xl mx-auto pb-20">
-        {/* Delete Confirmation Modal */}
         {showDeleteModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-sm w-full shadow-2xl">
@@ -477,7 +498,6 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
           </button>
         </div>
 
-        {/* Create Bar */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-8">
             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Create New Setlist</h3>
             <form onSubmit={handleCreateSetlist} className="flex gap-2">
@@ -507,21 +527,37 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
           </div>
 
         <div className="space-y-8">
-          {/* Personal Section */}
-          {personalSetlists.length > 0 && (
-            <div>
-              <h3 className="text-white font-bold mb-4 flex items-center gap-2">
-                <User size={18} className="text-cyan-400" /> Personal
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {personalSetlists.map(list => (
-                   <SetlistCard key={list.id} list={list} onDelete={confirmDeleteSetlist} onSelect={handleSelectSetlist} />
-                ))}
+          <div>
+            <h3 className="text-white font-bold mb-4 flex items-center gap-2">
+              <User size={18} className="text-cyan-400" /> Personal
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* VIRTUAL FAVORITES CARD */}
+              <div 
+                onClick={() => handleSelectSetlist(favoriteSetlist)}
+                className="bg-gradient-to-br from-pink-900/40 to-slate-900 border border-pink-500/30 rounded-xl p-6 cursor-pointer hover:border-pink-500 transition-all group relative overflow-hidden"
+              >
+                <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform duration-500">
+                  <Heart size={100} fill="currentColor" className="text-pink-500" />
+                </div>
+                <div className="flex justify-between items-start relative z-10">
+                  <div>
+                    <h3 className="text-xl font-bold text-white mb-1 group-hover:text-pink-400 transition-colors flex items-center gap-2">
+                      <Heart size={20} fill="currentColor" className="text-pink-500 animate-pulse" /> My Favorites
+                    </h3>
+                    <div className="text-xs text-slate-500 flex items-center gap-2">
+                      Dynamic List • {allSongs.filter(s => s.is_favorite).length} songs
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
 
-          {/* Groups Sections */}
+              {personalSetlists.map(list => (
+                 <SetlistCard key={list.id} list={list} onDelete={confirmDeleteSetlist} onSelect={handleSelectSetlist} />
+              ))}
+            </div>
+          </div>
+
           {groupSetlists.map(g => (
             <div key={g.group.id}>
               <h3 className="text-white font-bold mb-4 flex items-center gap-2">
@@ -534,18 +570,15 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
               </div>
             </div>
           ))}
-
-          {personalSetlists.length === 0 && groupSetlists.length === 0 && (
-            <div className="text-center text-slate-500 py-10">No setlists created yet.</div>
-          )}
         </div>
       </div>
     );
   }
 
+  const isVirtual = currentSetlist.id === FAVORITES_ID;
+
   return (
     <div className="max-w-6xl mx-auto h-[calc(100vh-140px)] flex flex-col relative">
-      {/* PDF Modal */}
       {showPdfModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
            <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl w-96 shadow-2xl">
@@ -569,7 +602,6 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
         </div>
       )}
 
-      {/* Header */}
       <div className="mb-6 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-4">
           <button onClick={() => setCurrentSetlist(null)} className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-white">
@@ -577,7 +609,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
           </button>
           
           <div className="flex items-center gap-2">
-            {isEditingTitle ? (
+            {isEditingTitle && !isVirtual ? (
               <form 
                 onSubmit={(e) => { e.preventDefault(); handleUpdateSetlistTitle(); }}
                 className="flex items-center gap-2"
@@ -593,27 +625,34 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
               </form>
             ) : (
               <div className="flex items-center gap-3 group">
-                <h1 className="text-2xl font-bold text-white cursor-pointer" onClick={() => setIsEditingTitle(true)}>
+                <h1 className="text-2xl font-bold text-white cursor-pointer flex items-center gap-3" onClick={() => !isVirtual && setIsEditingTitle(true)}>
+                  {isVirtual && <Heart size={24} className="text-pink-500" fill="currentColor" />}
                   {currentSetlist.title}
                 </h1>
-                <button onClick={() => setIsEditingTitle(true)} className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-cyan-400 transition-opacity">
-                   <Edit2 size={16} />
-                </button>
+                {!isVirtual && (
+                  <button onClick={() => setIsEditingTitle(true)} className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-cyan-400 transition-opacity">
+                     <Edit2 size={16} />
+                  </button>
+                )}
               </div>
             )}
             
-            {/* Show group badge if applicable */}
             {currentSetlist.group_id && (
               <span className="px-2 py-0.5 rounded-full bg-purple-900/30 text-purple-400 text-xs border border-purple-800/50 flex items-center gap-1">
                 <Users size={12} />
                 Group Setlist
               </span>
             )}
+
+            {isVirtual && (
+              <span className="px-2 py-0.5 rounded-full bg-pink-900/30 text-pink-400 text-xs border border-pink-800/50 flex items-center gap-1">
+                Smart List
+              </span>
+            )}
           </div>
         </div>
         
         <div className="flex gap-3">
-            {/* Notation Toggle in Main Editor View too? Why not, useful for Perform preview */}
             <button 
                 onClick={() => setNotationMode(m => m === NotationMode.LETTERS ? NotationMode.DEGREES : NotationMode.LETTERS)}
                 className="flex items-center gap-2 px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm font-medium text-slate-300 hover:text-white transition-colors"
@@ -643,35 +682,35 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
       </div>
 
       <div className="flex-1 flex gap-8 overflow-hidden">
-        {/* Left: Current List (Draggable) */}
         <div className="w-7/12 flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
            <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
              <div>
                <h3 className="font-bold text-white">Setlist Order</h3>
                <p className="text-xs text-slate-500">{setlistItems.length} songs</p>
              </div>
-             <div className="text-xs text-slate-500 italic">Drag to reorder</div>
+             {!isVirtual && <div className="text-xs text-slate-500 italic">Drag to reorder</div>}
+             {isVirtual && <div className="text-xs text-pink-500 font-bold uppercase tracking-wider">Viewing favorites</div>}
            </div>
            
            <div className="flex-1 overflow-y-auto p-2 space-y-2">
              {setlistItems.length === 0 && (
                <div className="text-center text-slate-500 py-10 text-sm italic">
-                 This setlist is empty.<br/>Add songs from the library.
+                 {isVirtual ? "You haven't favorited any songs yet." : "This setlist is empty. Add songs from the library."}
                </div>
              )}
              {setlistItems.map((item, index) => (
                <div 
                  key={item.id}
-                 draggable
+                 draggable={!isVirtual}
                  onDragStart={(e) => handleDragStart(e, index)}
                  onDragEnter={(e) => handleDragEnter(e, index)}
                  onDragEnd={handleDragEnd}
                  onDragOver={(e) => e.preventDefault()}
-                 className="flex items-center gap-3 bg-slate-950 border border-slate-800 p-3 rounded-lg group hover:border-slate-700 cursor-move"
+                 className={`flex items-center gap-3 bg-slate-950 border border-slate-800 p-3 rounded-lg group hover:border-slate-700 ${!isVirtual ? 'cursor-move' : 'cursor-default'}`}
                >
                  <div className="flex flex-col items-center justify-center w-6 text-slate-600">
                     <span className="text-xs font-bold mb-1">{index + 1}</span>
-                    <GripVertical className="cursor-grab hover:text-slate-400" size={16} />
+                    {!isVirtual && <GripVertical className="cursor-grab hover:text-slate-400" size={16} />}
                  </div>
                  
                  <div className="flex-1 min-w-0">
@@ -679,7 +718,6 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
                    <div className="text-xs text-slate-500 truncate">{item.song.artist} • Original: {item.song.key}</div>
                  </div>
 
-                 {/* Transpose Controls */}
                  <div className="flex items-center bg-slate-900 rounded border border-slate-800 mr-2">
                     <button 
                       onClick={() => updateItemTranspose(item.id, item.transpose - 1)}
@@ -698,57 +736,71 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
                     </button>
                  </div>
 
-                 <button 
-                   onClick={() => removeSongFromSetlist(item.id)}
-                   className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-2"
-                 >
-                   <Trash2 size={16} />
-                 </button>
+                 {!isVirtual && (
+                   <button 
+                     onClick={() => removeSongFromSetlist(item.id)}
+                     className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-2"
+                   >
+                     <Trash2 size={16} />
+                   </button>
+                 )}
                </div>
              ))}
            </div>
         </div>
 
-        {/* Right: Search & Add */}
-        <div className="w-5/12 flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-           <div className="p-4 border-b border-slate-800">
-             <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
-                <input 
-                  type="text"
-                  placeholder="Search library..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 pl-10 pr-4 text-sm text-slate-300 focus:outline-none focus:border-cyan-500"
-                />
+        {!isVirtual && (
+          <div className="w-5/12 flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+             <div className="p-4 border-b border-slate-800">
+               <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+                  <input 
+                    type="text"
+                    placeholder="Search library..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 pl-10 pr-4 text-sm text-slate-300 focus:outline-none focus:border-cyan-500"
+                  />
+               </div>
              </div>
-           </div>
-           
-           <div className="flex-1 overflow-y-auto p-2 space-y-2">
-             {allSongs
-               .filter(s => 
-                 !setlistItems.find(item => item.song.id === s.id) && // Exclude already added
-                 (s.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                  s.artist.toLowerCase().includes(searchQuery.toLowerCase()))
-               )
-               .slice(0, 30) // LIMIT DISPLAY TO 30 ITEMS FOR PERFORMANCE
-               .map(song => (
-                 <div key={song.id} className="flex items-center justify-between p-3 hover:bg-slate-800 rounded-lg transition-colors group">
-                    <div className="min-w-0">
-                       <div className="font-medium text-slate-200 truncate group-hover:text-white">{song.title}</div>
-                       <div className="text-xs text-slate-500">{song.artist}</div>
-                    </div>
-                    <button 
-                      onClick={() => addSongToSetlist(song)}
-                      className="p-1.5 bg-slate-800 hover:bg-cyan-600 hover:text-white text-cyan-500 rounded-md transition-colors border border-slate-700 hover:border-cyan-500"
-                    >
-                      <Plus size={16} />
-                    </button>
-                 </div>
-               ))
-             }
-           </div>
-        </div>
+             
+             <div className="flex-1 overflow-y-auto p-2 space-y-2">
+               {allSongs
+                 .filter(s => 
+                   !setlistItems.find(item => item.song.id === s.id) && 
+                   (s.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                    s.artist.toLowerCase().includes(searchQuery.toLowerCase()))
+                 )
+                 .slice(0, 30)
+                 .map(song => (
+                   <div key={song.id} className="flex items-center justify-between p-3 hover:bg-slate-800 rounded-lg transition-colors group">
+                      <div className="min-w-0">
+                         <div className="font-medium text-slate-200 truncate group-hover:text-white">{song.title}</div>
+                         <div className="text-xs text-slate-500">{song.artist}</div>
+                      </div>
+                      <button 
+                        onClick={() => addSongToSetlist(song)}
+                        className="p-1.5 bg-slate-800 hover:bg-cyan-600 hover:text-white text-cyan-500 rounded-md transition-colors border border-slate-700 hover:border-cyan-500"
+                      >
+                        <Plus size={16} />
+                      </button>
+                   </div>
+                 ))
+               }
+             </div>
+          </div>
+        )}
+
+        {isVirtual && (
+          <div className="w-5/12 flex flex-col items-center justify-center bg-slate-900/50 border border-dashed border-slate-800 rounded-xl p-10 text-center">
+            <Heart size={48} className="text-pink-500/20 mb-4" />
+            <h4 className="text-white font-bold mb-2">Dynamic List</h4>
+            <p className="text-slate-500 text-sm leading-relaxed">
+              This list automatically updates whenever you favorite or unfavorite a song in the library. 
+              Changes to transposition here are local to this session.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

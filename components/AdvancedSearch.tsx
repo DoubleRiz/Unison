@@ -6,18 +6,24 @@ import { Search, Filter, Dices, Music, User, Tag, Loader2, ArrowUpAZ } from 'luc
 
 interface AdvancedSearchProps {
   session?: any;
+  initialQuery?: string;
   onSelectSong: (id: string) => void;
 }
 
-const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ session, onSelectSong }) => {
+const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ session, initialQuery = '', onSelectSong }) => {
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Filters State
-  const [searchTitle, setSearchTitle] = useState('');
+  const [searchTitle, setSearchTitle] = useState(initialQuery);
   const [selectedGenre, setSelectedGenre] = useState('');
   const [selectedTag, setSelectedTag] = useState('');
   const [selectedArtist, setSelectedArtist] = useState('');
+
+  // Sync initialQuery if it changes while component is mounted
+  useEffect(() => {
+    if (initialQuery) setSearchTitle(initialQuery);
+  }, [initialQuery]);
 
   useEffect(() => {
     fetchAllSongs();
@@ -31,10 +37,8 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ session, onSelectSong }
         .select('*');
 
       if (session?.user?.id) {
-        // Logged in: My songs OR Public songs
         query = query.or(`is_public.eq.true,user_id.eq.${session.user.id}`);
       } else {
-        // Guest: Public songs only
         query = query.eq('is_public', true);
       }
         
@@ -68,7 +72,6 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ session, onSelectSong }
     }
   };
 
-  // Derive unique lists for dropdowns based on loaded songs
   const uniqueArtists = useMemo(() => {
     const artists = new Set(songs.map(s => s.artist));
     return Array.from(artists).sort();
@@ -80,7 +83,6 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ session, onSelectSong }
     return Array.from(tags).sort();
   }, [songs]);
 
-  // Filter Logic
   const filteredSongs = songs.filter(song => {
     const matchesTitle = song.title.toLowerCase().includes(searchTitle.toLowerCase());
     const matchesArtist = selectedArtist ? song.artist === selectedArtist : true;
@@ -105,7 +107,7 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ session, onSelectSong }
   };
 
   return (
-    <div className="max-w-6xl mx-auto pb-20 p-6">
+    <div className="max-w-6xl mx-auto pb-20 p-6 animate-in fade-in duration-500">
       <div className="mb-8 border-b border-slate-800 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
@@ -238,7 +240,6 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ session, onSelectSong }
                 <div className="text-sm text-slate-400 mb-3">{song.artist}</div>
                 
                 <div className="flex flex-wrap gap-1.5">
-                   {/* Badges for Genres/Tags */}
                    {song.genres?.slice(0, 2).map(g => (
                      <span key={g} className="text-[10px] px-1.5 py-0.5 bg-slate-950 text-slate-500 rounded border border-slate-800">
                        {g}
