@@ -28,13 +28,15 @@ import {
   Lock,
   ArrowRight,
   Download,
-  X
+  X,
+  Smartphone
 } from 'lucide-react';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const [isAppInstalled, setIsAppInstalled] = useState(false);
   
   // Theme State
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -54,7 +56,6 @@ const App: React.FC = () => {
   
   // Responsive State
   const [isMobile, setIsMobile] = useState(false);
-  // Default is now false (collapsed/rail mode)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Apply Theme Effect
@@ -65,28 +66,41 @@ const App: React.FC = () => {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  // PWA Install Logic
+  // PWA Install & Environment Check
   useEffect(() => {
+    // Check if already in standalone mode (installed)
+    if (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone) {
+      setIsAppInstalled(true);
+    }
+
     const handleBeforeInstallPrompt = (e: any) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      // Only show banner if we haven't dismissed it this session
-      if (!sessionStorage.getItem('pwa_banner_dismissed')) {
+      if (!sessionStorage.getItem('pwa_banner_dismissed') && !isAppInstalled) {
         setShowInstallBanner(true);
       }
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', () => {
+      setIsAppInstalled(true);
+      setShowInstallBanner(false);
+    });
+
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-  }, []);
+  }, [isAppInstalled]);
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setDeferredPrompt(null);
-      setShowInstallBanner(false);
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+        setShowInstallBanner(false);
+      }
+    } else {
+      // Fallback for iOS or Android browsers that don't support beforeinstallprompt
+      alert("Pour installer l'app : \n1. Appuyez sur les 3 points (Android) ou Partager (iOS)\n2. Sélectionnez 'Ajouter à l'écran d'accueil'");
     }
   };
 
@@ -98,8 +112,6 @@ const App: React.FC = () => {
     const handleResize = () => {
       const mobile = window.innerWidth < 768;
       setIsMobile(mobile);
-      // On desktop, we don't force it open anymore. 
-      // We only ensure it's closed on mobile to not obstruct view.
       if (mobile) {
         setIsSidebarOpen(false);
       }
@@ -372,24 +384,24 @@ const App: React.FC = () => {
       
       {showAuthModal && <Auth onClose={() => setShowAuthModal(false)} />}
       
-      {/* PWA Install Banner */}
+      {/* Enhanced PWA Install Banner */}
       {showInstallBanner && (
-        <div className="fixed top-20 left-4 right-4 z-[100] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-2xl flex items-center justify-between animate-in slide-in-from-top-10 duration-500">
+        <div className="fixed top-20 left-4 right-4 z-[100] bg-white dark:bg-slate-900 border-2 border-cyan-500/30 rounded-2xl p-4 shadow-2xl flex items-center justify-between animate-in slide-in-from-top-10 duration-500 ring-4 ring-cyan-500/5">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-cyan-600 flex items-center justify-center shadow-lg">
-              <Download className="text-white" size={20} />
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-600 to-purple-600 flex items-center justify-center shadow-lg">
+              <Smartphone className="text-white" size={20} />
             </div>
             <div>
-              <div className="text-sm font-bold text-slate-900 dark:text-white">Installer Unison</div>
-              <div className="text-[10px] text-slate-500">Accès rapide depuis votre écran d'accueil</div>
+              <div className="text-sm font-bold text-slate-900 dark:text-white">Installer Unison App</div>
+              <div className="text-[10px] text-slate-500 font-medium">Meilleure expérience et mode hors-ligne</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button 
               onClick={handleInstallClick}
-              className="px-4 py-2 bg-cyan-600 text-white rounded-lg text-xs font-bold shadow-md active:scale-95 transition-all"
+              className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-bold shadow-md active:scale-95 transition-all flex items-center gap-1.5"
             >
-              Installer
+              <Download size={14} /> {deferredPrompt ? 'Installer' : 'Aide'}
             </button>
             <button 
               onClick={() => {

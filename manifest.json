@@ -1,13 +1,17 @@
 
 {
+  "id": "com.unison.musicapp",
   "name": "Unison Music Sheets",
   "short_name": "Unison",
-  "description": "Professional musician's tool for managing song sheets.",
-  "start_url": "/",
+  "description": "Professional musician's tool for managing song sheets and setlists.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
+  "display_override": ["window-controls-overlay", "minimal-ui"],
+  "background_color": "#020617",
   "theme_color": "#0f172a",
-  "orientation": "portrait-primary",
+  "orientation": "any",
+  "categories": ["music", "productivity"],
   "icons": [
     {
       "src": "https://img.icons8.com/fluency/192/music-identifier.png",
