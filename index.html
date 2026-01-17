@@ -3,8 +3,20 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Unison | Professional Music Sheets</title>
+    
+    <!-- PWA Primary Meta -->
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="description" content="Professional musician's tool for song sheets and collaboration." />
+    <link rel="manifest" href="/manifest.json" />
+    
+    <!-- iOS Support -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Unison" />
+    <link rel="apple-touch-icon" href="https://img.icons8.com/fluency/512/music-identifier.png" />
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -22,6 +34,19 @@
         }
       }
     </script>
+    <style>
+      /* Prevent elastic scrolling on the body for a more app-like feel */
+      body {
+        overscroll-behavior-y: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      /* Ensure full height on mobile */
+      html, body, #root {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+    </style>
   <script type="importmap">
 {
   "imports": {

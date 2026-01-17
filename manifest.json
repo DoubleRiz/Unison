@@ -1,0 +1,25 @@
+
+{
+  "name": "Unison Music Sheets",
+  "short_name": "Unison",
+  "description": "Professional musician's tool for managing song sheets.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "https://img.icons8.com/fluency/192/music-identifier.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://img.icons8.com/fluency/512/music-identifier.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
