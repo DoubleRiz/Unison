@@ -21,13 +21,14 @@ import {
   Hash,
   Type,
   AlignLeft,
-  Check
-  Type,
-  Heart
+  Check,
+  Heart,
+  ChevronUp,
+  ChevronDown
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import SongSheet from './SongSheet';
-import { transposeContent, transpose } from '../utils/musicLogic';
+import { transposeContent, transpose, getSectionType } from '../utils/musicLogic';
 
 const FAVORITES_ID = 'virtual_favorites';
 
@@ -42,11 +43,10 @@ interface SetlistEditorProps {
 interface SongItem {
   type: 'song';
   id: string;
-interface SetlistItem {
-  id: string; // ID from setlist_songs table or song_id for virtuals
   song: Song;
   transpose: number;
 }
+
 
 interface TextItem {
   type: 'text';
@@ -100,6 +100,31 @@ const loadFullOrder = (setlistId: string): StoredEntry[] => {
   }
 };
 
+// ── SetlistCard ───────────────────────────────────────────────────────────
+interface SetlistCardProps {
+  list: Setlist;
+  onDelete: (id: string, e: React.MouseEvent) => void;
+  onSelect: (l: Setlist) => void;
+}
+
+const SetlistCard: React.FC<SetlistCardProps> = ({ list, onDelete, onSelect }) => (
+  <div onClick={() => onSelect(list)}
+    className="bg-slate-900 border border-slate-800 rounded-xl p-6 cursor-pointer hover:border-cyan-500/50 transition-all group relative">
+    <div className="flex justify-between items-start">
+      <div>
+        <h3 className="text-xl font-bold text-white mb-1 group-hover:text-cyan-400 transition-colors">{list.title}</h3>
+        <div className="text-xs text-slate-500 flex items-center gap-2">
+          <Calendar size={12} />
+          {new Date(list.created_at).toLocaleDateString()}
+        </div>
+      </div>
+      <button onClick={(e) => onDelete(list.id, e)} className="text-slate-600 hover:text-red-400 p-2">
+        <Trash2 size={18} />
+      </button>
+    </div>
+  </div>
+);
+
 // ──────────────────────────────────────────────────────────────────────────
 const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, onBack }) => {
   const [setlists, setSetlists] = useState<Setlist[]>([]);
@@ -113,11 +138,60 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState('');
 
+  // Scroll to library helper
+  const libraryRef = useRef<HTMLDivElement>(null);
+  const jumpToLibrary = () => {
+    libraryRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   // Text block editing state
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [editingTextValue, setEditingTextValue] = useState('');
   const [editingTextColor, setEditingTextColor] = useState<string>('amber');
   const [editingTextSize, setEditingTextSize] = useState<'sm' | 'md' | 'lg'>('md');
+
+  const handleAddTextNote = () => {
+    setEditingTextId('new');
+    setEditingTextValue('');
+    setEditingTextColor('amber');
+    setEditingTextSize('md');
+  };
+
+  const handleEditNote = (item: TextItem) => {
+    setEditingTextId(item.id);
+    setEditingTextValue(item.content);
+    setEditingTextColor(item.color);
+    setEditingTextSize(item.size);
+  };
+
+  const saveTextNote = () => {
+    if (!editingTextValue.trim() || !currentSetlist || currentSetlist.id === FAVORITES_ID) {
+      setEditingTextId(null);
+      return;
+    }
+    
+    if (editingTextId === 'new') {
+      const newNote: TextItem = {
+        type: 'text',
+        id: generateId(),
+        content: editingTextValue.trim(),
+        color: editingTextColor,
+        size: editingTextSize
+      };
+      const newItems = [...setlistItems, newNote];
+      setSetlistItems(newItems);
+      saveFullOrder(currentSetlist.id, newItems);
+    } else {
+      const newItems = setlistItems.map(item => 
+        item.id === editingTextId && item.type === 'text' 
+          ? { ...item, content: editingTextValue.trim(), color: editingTextColor, size: editingTextSize } 
+          : item
+      );
+      setSetlistItems(newItems);
+      saveFullOrder(currentSetlist.id, newItems);
+    }
+    setEditingTextId(null);
+  };
 
   const [notationMode, setNotationMode] = useState<NotationMode>(NotationMode.LETTERS);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -155,6 +229,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
       const favorites = allSongs
         .filter(s => s.is_favorite)
         .map(song => ({
+          type: 'song' as const,
           id: `fav_${song.id}`,
           song: song,
           transpose: 0
@@ -166,7 +241,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     const { data, error } = await supabase
       .from('setlist_songs')
       .select('*')
-      .eq('setlist_id', setlist.id)
+      .eq('setlist_id', setlistId)
       .order('position', { ascending: true });
 
     if (!error && data) {
@@ -176,7 +251,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
         return { type: 'song' as const, id: item.id, song, transpose: item.transpose || 0 };
       }).filter(Boolean) as SongItem[];
 
-      const savedOrder = loadFullOrder(setlist.id);
+      const savedOrder = loadFullOrder(setlistId);
       if (savedOrder.length === 0) { setSetlistItems(songItems); return; }
 
       const songMap = new Map(songItems.map(s => [s.id, s]));
@@ -252,7 +327,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
 
   const handleSelectSetlist = (setlist: Setlist) => {
     setCurrentSetlist(setlist);
-    fetchSetlistItems(setlist);
+    fetchSetlistItems(setlist.id);
     setPerformanceMode(false);
   };
 
@@ -260,7 +335,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   const addSongToSetlist = async (song: Song) => {
     if (!currentSetlist || currentSetlist.id === FAVORITES_ID) return;
 
-    if (setlistItems.find(item => item.song.id === song.id)) {
+    if (setlistItems.some(item => item.type === 'song' && item.song.id === song.id)) {
       alert("Song already in setlist");
       return;
     }
@@ -275,7 +350,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     }
   };
 
-  const removeSongFromSetlist = async (itemId: string) => {
+  const removeItemFromSetlist = async (itemId: string) => {
     if (currentSetlist?.id === FAVORITES_ID) return;
 
     await supabase
@@ -310,6 +385,23 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     dragOverItem.current = position;
   };
 
+  const updateAllPositions = async (items: SetlistItem[]) => {
+    if (!currentSetlist) return;
+    saveFullOrder(currentSetlist.id, items);
+    const songUpdates = items
+      .filter((item): item is SongItem => item.type === 'song')
+      .map((item, index) => ({
+        id: item.id,
+        setlist_id: currentSetlist.id,
+        song_id: item.song.id,
+        position: index,
+        transpose: item.transpose
+      }));
+    if (songUpdates.length > 0) {
+      await supabase.from('setlist_songs').upsert(songUpdates);
+    }
+  };
+
   const handleDragEnd = async (e: React.DragEvent<HTMLDivElement>) => {
     if (currentSetlist?.id === FAVORITES_ID) return;
     e.currentTarget.classList.remove('opacity-50');
@@ -324,15 +416,17 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     dragItem.current = null;
     dragOverItem.current = null;
     setSetlistItems(newItems);
-    saveFullOrder(currentSetlist.id, newItems);
+    await updateAllPositions(newItems);
+  };
 
-    const songUpdates = newItems
-      .filter((item): item is SongItem => item.type === 'song')
-      .map((item, index) => ({
-        id: item.id, setlist_id: currentSetlist.id,
-        song_id: item.song.id, position: index, transpose: item.transpose
-      }));
-    if (songUpdates.length > 0) await supabase.from('setlist_songs').upsert(songUpdates);
+  const moveItem = async (fromIndex: number, toIndex: number) => {
+    if (toIndex < 0 || toIndex >= setlistItems.length || !currentSetlist || isVirtual) return;
+    const newItems = [...setlistItems];
+    const item = newItems[fromIndex];
+    newItems.splice(fromIndex, 1);
+    newItems.splice(toIndex, 0, item);
+    setSetlistItems(newItems);
+    await updateAllPositions(newItems);
   };
 
   const startPerformance = () => {
@@ -347,24 +441,67 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.width;
     const pageHeight = doc.internal.pageSize.height;
-    const margin = 10;
-    const lineHeight = 6;
+    const margin = 15;
+    const contentWidth = pageWidth - (margin * 2);
+    const songLineH = 5.2;
+
+    const newPage = () => {
+      doc.addPage();
+      return 20; 
+    };
+
+    let cursorY = 20;
+
+    const sanitizePdfText = (text: string) => {
+      return text
+        .replace(/[\u00A0\u2000-\u200b\u202f\u205f\u3000]/g, ' ')
+        .replace(/\t/g, '    ')
+        .replace(/[‘’`]/g, "'")
+        .replace(/[“”]/g, '"')
+        .replace(/…/g, '...')
+        .replace(/œ/g, 'oe').replace(/Œ/g, 'Oe')
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    };
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(150);
+    doc.text(pdfTitle, margin, 10);
+    doc.text(`Setlist Export`, pageWidth - margin, 10, { align: 'right' });
 
     setlistItems.forEach((item, index) => {
-      if (index > 0) doc.addPage();
+      if (item.type === 'text') {
+        const color = TEXT_COLORS[item.color] || TEXT_COLORS.default;
+        const size = TEXT_SIZES[item.size] || TEXT_SIZES.md;
+        
+        doc.setFontSize(size.pdfFontSize);
+        doc.setTextColor(color.pdfRgb[0], color.pdfRgb[1], color.pdfRgb[2]);
+        doc.setFont("helvetica", "bold");
+        
+        const lines = doc.splitTextToSize(item.content, contentWidth);
+        const textHeightTotal = lines.length * size.pdfLineSpacing;
+        
+        if (cursorY + textHeightTotal > pageHeight - margin) cursorY = newPage();
+        
+        lines.forEach((line: string) => {
+          if (cursorY > pageHeight - margin) cursorY = newPage();
+          doc.text(line, margin, cursorY);
+          cursorY += size.pdfLineSpacing;
+        });
+        
+        cursorY += 10;
+        return;
+      }
 
       const song = item.song;
 
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(150);
-      doc.text(pdfTitle, margin, 10);
-      doc.text(`Page ${index + 1}/${setlistItems.length}`, pageWidth - margin, 10, { align: 'right' });
+      if (cursorY + 30 > pageHeight - margin) cursorY = newPage();
 
       doc.setFontSize(24);
       doc.setTextColor(0);
       doc.setFont("helvetica", "bold");
-      doc.text(song.title, margin, 25);
+      doc.text(song.title, margin, cursorY);
+      cursorY += 7;
 
       doc.setFontSize(12);
       doc.setFont("helvetica", "normal");
@@ -372,56 +509,61 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
         ? `${song.key} (${item.transpose > 0 ? '+' : ''}${item.transpose}) -> ${transpose(song.key, item.transpose)}`
         : song.key;
 
-      doc.text(`${song.artist} • ${keyText}${song.bpm ? ` • ${song.bpm} BPM` : ''}`, margin, 32);
+      doc.text(`${song.artist} • ${keyText}`, margin, cursorY);
+      cursorY += 13;
 
       doc.setFont("courier", "normal");
       doc.setFontSize(11);
 
-      let cursorY = 45;
       const transposedContent = transposeContent(song.content, item.transpose);
-      const lines = transposedContent.split('\n');
+      const lines = transposedContent.split(/\r?\n/);
 
       lines.forEach(line => {
         if (cursorY > pageHeight - margin) {
-          doc.addPage();
-          cursorY = 20;
+          cursorY = newPage();
         }
 
-        const isSection = /^\[(Intro|Verse|Chorus|Refrain|Bridge|Pont|Pre-Chorus|Outro|Solo|Instrumental|Couplet).*\]$/i.test(line.trim());
-        if (isSection) {
+        const sectionName = getSectionType(line);
+        if (sectionName) {
           cursorY += 3;
           doc.setFont("courier", "bold");
-          doc.setFontSize(8);
-          doc.setTextColor(130, 130, 130);
-          doc.text(line.trim().replace('[', '').replace(']', '').toUpperCase(), margin, cursorY);
+          doc.setFontSize(11);
+          doc.setTextColor(0, 0, 0);
+          doc.text(sanitizePdfText(line.trim().toUpperCase()), margin, cursorY);
           doc.setFont("courier", "normal");
-          doc.setFontSize(9);
-          doc.setTextColor(20, 20, 20);
+          doc.setTextColor(0, 0, 0);
           cursorY += songLineH;
           return;
         }
 
-        // Inline chords + lyrics
-        let cursorX = margin;
-        line.split(/(\[.*?\])/g).forEach(seg => {
-          if (seg.startsWith('[') && seg.endsWith(']')) {
-            const chord = seg.slice(1, -1);
+        // Render line with highlighted chords
+        const parts = line.split(/\[(.*?)\]/g);
+        let currentX = margin;
+        doc.setFontSize(11);
+        
+        parts.forEach((part, i) => {
+          const isChord = i % 2 === 1;
+          if (isChord) {
             doc.setFont("courier", "bold");
-            doc.text(chord, cursorX, cursorY);
-            cursorX += doc.getTextWidth(chord);
-            doc.setFont("courier", "normal");
+            doc.setTextColor(0, 153, 184); // Cyan
           } else {
-            doc.text(seg, cursorX, cursorY);
-            cursorX += doc.getTextWidth(seg);
+            doc.setFont("courier", "normal");
+            doc.setTextColor(0, 0, 0); // Black
+          }
+          
+          const textToRender = sanitizePdfText(part);
+          if (textToRender) {
+            doc.text(textToRender, currentX, cursorY);
+            currentX += doc.getTextWidth(textToRender);
           }
         });
+
         cursorY += songLineH;
       });
 
-      // Performance notes (if any)
       if (song.notes?.trim()) {
         cursorY += 5;
-        if (cursorY > pageHeight - margin - 15) newPage();
+        if (cursorY > pageHeight - margin - 15) cursorY = newPage();
         doc.setFont("helvetica", "bold");
         doc.setFontSize(8);
         doc.setTextColor(130, 130, 130);
@@ -430,18 +572,17 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
         doc.setFont("helvetica", "normal");
         doc.setFontSize(8);
         doc.splitTextToSize(song.notes, contentWidth).forEach((nl: string) => {
-          if (cursorY > pageHeight - margin) newPage();
+          if (cursorY > pageHeight - margin) cursorY = newPage();
           doc.text(nl, margin, cursorY);
           cursorY += 4.5;
         });
       }
-    }
+      
+      cursorY += 15;
+    });
 
-      isFirstItem = false;
-  });
-
-  doc.save(`${pdfTitle}.pdf`);
-};
+    doc.save(`${pdfTitle}.pdf`);
+  };
 
 const favoriteSetlist: Setlist = {
   id: FAVORITES_ID,
@@ -455,11 +596,11 @@ if (performanceMode && currentSetlist) {
   return (
     <div className="fixed inset-0 bg-slate-950 z-50 flex flex-col">
       <div className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 shrink-0">
-        <div className="flex items-center gap-4">
-          <button onClick={() => setPerformanceMode(false)} className="text-slate-400 hover:text-white"><X size={24} /></button>
-          <div>
-            <h2 className="text-lg font-bold text-white leading-tight">{currentSetlist.title}</h2>
-            <div className="text-xs text-slate-400">{performanceIndex + 1} / {setlistItems.length}</div>
+        <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+          <button onClick={() => setPerformanceMode(false)} className="text-slate-400 hover:text-white shrink-0"><X size={24} /></button>
+          <div className="min-w-0">
+            <h2 className="text-base sm:text-lg font-bold text-white leading-tight truncate">{currentSetlist.title}</h2>
+            <div className="text-[10px] sm:text-xs text-slate-400">{performanceIndex + 1} / {setlistItems.length}</div>
           </div>
         </div>
         <div className="flex items-center gap-4">
@@ -484,11 +625,21 @@ if (performanceMode && currentSetlist) {
       </div>
       <div className="flex-1 overflow-y-auto p-6 scroll-smooth bg-slate-950">
         <div className="max-w-4xl mx-auto">
-          <SongSheet
-            song={currentItem.song}
-            transposeSemitones={currentItem.transpose}
-            notationMode={notationMode}
-          />
+          {currentItem.type === 'song' ? (
+            <SongSheet
+              song={currentItem.song}
+              transposeSemitones={currentItem.transpose}
+              notationMode={notationMode}
+            />
+          ) : (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 min-h-[400px] flex items-center justify-center text-center">
+              <div className="max-w-2xl">
+                <div className={`text-2xl font-bold mb-4 ${TEXT_SIZES[currentItem.size]?.uiClass || ''}`} style={{ color: TEXT_COLORS[currentItem.color]?.hex || '#fff' }}>
+                  {currentItem.content}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -531,20 +682,22 @@ if (!currentSetlist) {
         <button onClick={onBack} className="text-slate-400 hover:text-white flex items-center gap-2"><ChevronLeft size={20} /> Back</button>
       </div>
 
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-8">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6 mb-8">
         <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Create New Setlist</h3>
-        <form onSubmit={handleCreateSetlist} className="flex gap-2">
+        <form onSubmit={handleCreateSetlist} className="flex flex-col sm:flex-row gap-3">
           <input type="text" placeholder="Gig at The Pub..." value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
-            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-cyan-500" />
+            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 sm:py-2 text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-500" />
           {groups.length > 0 && (
-            <select value={selectedGroupId} onChange={(e) => setSelectedGroupId(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-cyan-500">
-              <option value="">Personal</option>
-              {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </select>
+            <div className="flex-1 sm:flex-none sm:w-48">
+              <select value={selectedGroupId} onChange={(e) => setSelectedGroupId(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 sm:py-2 text-white focus:outline-none focus:border-cyan-500 appearance-none">
+                <option value="">Personal</option>
+                {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
+            </div>
           )}
-          <button type="submit" className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 rounded-lg flex items-center gap-2 font-medium">
+          <button type="submit" className="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-3 sm:py-2 rounded-lg flex items-center justify-center gap-2 font-bold shadow-lg shadow-cyan-900/20 active:scale-95 transition-all">
             <Plus size={20} /> Create
           </button>
         </form>
@@ -595,12 +748,72 @@ if (!currentSetlist) {
   );
 }
 
-const isVirtual = currentSetlist.id === FAVORITES_ID;
+const isVirtual = currentSetlist?.id === FAVORITES_ID;
 
-return (
-  <div className="max-w-6xl mx-auto h-[calc(100vh-140px)] flex flex-col relative">
-    {showPdfModal && (
-      <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+  return (
+    <div className="max-w-6xl mx-auto min-h-[calc(100vh-140px)] flex flex-col relative px-4 sm:px-0">
+      {editingTextId !== null && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-md w-full shadow-2xl">
+            <h3 className="text-xl font-bold text-white mb-4">
+              {editingTextId === 'new' ? 'Add Text Note' : 'Edit Text Note'}
+            </h3>
+            
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Text Content</label>
+                <textarea
+                  value={editingTextValue}
+                  onChange={(e) => setEditingTextValue(e.target.value)}
+                  placeholder="Enter your note..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500 h-24 resize-none"
+                />
+              </div>
+              
+              <div className="flex gap-4">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Size</label>
+                  <select 
+                    value={editingTextSize} 
+                    onChange={(e) => setEditingTextSize(e.target.value as any)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500"
+                  >
+                    {Object.entries(TEXT_SIZES).map(([key, size]) => (
+                      <option key={key} value={key}>{size.description}</option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Color</label>
+                  <select 
+                    value={editingTextColor} 
+                    onChange={(e) => setEditingTextColor(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500"
+                  >
+                    {Object.entries(TEXT_COLORS).map(([key, color]) => (
+                      <option key={key} value={key}>{color.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setEditingTextId(null)} className="px-4 py-2 text-slate-400 hover:text-white">Cancel</button>
+              <button 
+                onClick={saveTextNote} 
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPdfModal && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
         <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl w-96 shadow-2xl">
           <h3 className="text-xl font-bold text-white mb-4">Export PDF</h3>
           <div className="mb-3">
@@ -621,12 +834,12 @@ return (
       </div>
     )}
 
-    <div className="mb-6 flex items-center justify-between flex-shrink-0">
-      <div className="flex items-center gap-4">
-        <button onClick={() => setCurrentSetlist(null)} className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-white">
+    <div className="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 flex-shrink-0">
+      <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto">
+        <button onClick={() => setCurrentSetlist(null)} className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-white shrink-0">
           <ChevronLeft size={20} />
         </button>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           {isEditingTitle && !isVirtual ? (
             <form
               onSubmit={(e) => { e.preventDefault(); handleUpdateSetlistTitle(); }}
@@ -641,10 +854,10 @@ return (
                 className="bg-slate-950 border border-cyan-500 rounded px-2 py-1 text-xl font-bold text-white focus:outline-none" />
             </form>
           ) : (
-            <div className="flex items-center gap-3 group">
-              <h1 className="text-2xl font-bold text-white cursor-pointer flex items-center gap-3" onClick={() => !isVirtual && setIsEditingTitle(true)}>
-                {isVirtual && <Heart size={24} className="text-pink-500" fill="currentColor" />}
-                {currentSetlist.title}
+            <div className="flex items-center gap-3 group min-w-0">
+              <h1 className="text-xl sm:text-2xl font-bold text-white cursor-pointer flex items-center gap-3 truncate" onClick={() => !isVirtual && setIsEditingTitle(true)}>
+                {isVirtual && <Heart size={24} className="text-pink-500 shrink-0" fill="currentColor" />}
+                <span className="truncate">{currentSetlist.title}</span>
               </h1>
               {!isVirtual && (
                 <button onClick={() => setIsEditingTitle(true)} className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-cyan-400 transition-opacity">
@@ -668,38 +881,53 @@ return (
           )}
         </div>
       </div>
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-2 sm:gap-3 w-full sm:w-auto">
         <button
           onClick={() => setNotationMode(m => m === NotationMode.LETTERS ? NotationMode.DEGREES : NotationMode.LETTERS)}
-          className="flex items-center gap-2 px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm font-medium text-slate-300 hover:text-white transition-colors"
+          className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm font-medium text-slate-300 hover:text-white transition-colors"
         >
           {notationMode === NotationMode.LETTERS ? <Hash size={18} /> : <Type size={18} />}
-          <span className="hidden sm:inline">{notationMode === NotationMode.LETTERS ? 'Letters' : 'Degrees'}</span>
+          <span>{notationMode === NotationMode.LETTERS ? 'Letters' : 'Degrees'}</span>
         </button>
 
         <button
           onClick={startPerformance}
           disabled={setlistItems.length === 0}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base"
         >
           <Play size={18} />
           Perform
         </button>
         <button onClick={() => setShowPdfModal(true)} disabled={setlistItems.length === 0}
-          className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-lg font-medium transition-colors disabled:opacity-50">
-          <FileDown size={18} /> Export PDF
+          className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-lg font-medium transition-colors disabled:opacity-50 text-sm sm:text-base">
+          <FileDown size={18} /> <span className="hidden sm:inline">Export PDF</span><span className="sm:hidden">PDF</span>
         </button>
       </div>
     </div>
 
-    <div className="flex-1 flex gap-8 overflow-hidden">
-      <div className="w-7/12 flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+    <div className="flex-1 flex flex-col lg:flex-row gap-6 lg:gap-8 overflow-visible lg:overflow-hidden pb-10">
+      <div className="w-full lg:w-7/12 flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden min-h-[400px]">
         <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
           <div>
             <h3 className="font-bold text-white">Setlist Order</h3>
-            <p className="text-xs text-slate-500">{setlistItems.length} songs</p>
+            <p className="text-xs text-slate-500">{setlistItems.length} items</p>
           </div>
-          {!isVirtual && <div className="text-xs text-slate-500 italic">Drag to reorder</div>}
+          {!isVirtual && (
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={jumpToLibrary}
+                className="lg:hidden text-xs flex items-center gap-1 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-400 py-1.5 px-3 rounded-md transition-colors border border-cyan-800/50"
+              >
+                <Plus size={14} /> Add Song
+              </button>
+              <button 
+                onClick={handleAddTextNote}
+                className="text-xs flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-1.5 px-3 rounded-md transition-colors border border-slate-700 hover:border-slate-500"
+              >
+                <Type size={14} /> <span className="hidden xs:inline">Add Note</span><span className="xs:hidden">Note</span>
+              </button>
+            </div>
+          )}
           {isVirtual && <div className="text-xs text-pink-500 font-bold uppercase tracking-wider">Viewing favorites</div>}
         </div>
 
@@ -719,41 +947,82 @@ return (
               onDragOver={(e) => e.preventDefault()}
               className={`flex items-center gap-3 bg-slate-950 border border-slate-800 p-3 rounded-lg group hover:border-slate-700 ${!isVirtual ? 'cursor-move' : 'cursor-default'}`}
             >
-              <div className="flex flex-col items-center justify-center w-6 text-slate-600">
-                <span className="text-xs font-bold mb-1">{index + 1}</span>
-                {!isVirtual && <GripVertical className="cursor-grab hover:text-slate-400" size={16} />}
+              <div className="flex flex-col items-center justify-center w-10 text-slate-600 gap-0.5 border-r border-slate-800/50 mr-1">
+                {!isVirtual && (
+                  <button 
+                    onClick={() => moveItem(index, index - 1)}
+                    disabled={index === 0}
+                    className="p-2 hover:text-cyan-400 disabled:opacity-0 transition-all focus:outline-none active:scale-125"
+                    title="Move Up"
+                  >
+                    <ChevronUp size={20} />
+                  </button>
+                )}
+                <span className="text-[10px] font-bold leading-none select-none text-slate-500">{index + 1}</span>
+                {!isVirtual && (
+                  <button 
+                    onClick={() => moveItem(index, index + 1)}
+                    disabled={index === setlistItems.length - 1}
+                    className="p-2 hover:text-cyan-400 disabled:opacity-0 transition-all focus:outline-none active:scale-125"
+                    title="Move Down"
+                  >
+                    <ChevronDown size={20} />
+                  </button>
+                )}
+                {!isVirtual && <GripVertical className="cursor-grab hover:text-slate-400 mt-1 shrink-0 md:block hidden" style={{ touchAction: 'none' }} size={14} />}
               </div>
 
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-white truncate">{item.song.title}</div>
-                <div className="text-xs text-slate-500 truncate">{item.song.artist} • Original: {item.song.key}</div>
-              </div>
+              {item.type === 'song' ? (
+                <>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-white break-words sm:truncate">{item.song.title}</div>
+                    <div className="text-xs text-slate-500 break-words sm:truncate">{item.song.artist} • Original: {item.song.key}</div>
+                  </div>
 
-              <div className="flex items-center bg-slate-900 rounded border border-slate-800 mr-2">
-                <button
-                  onClick={() => updateItemTranspose(item.id, item.transpose - 1)}
-                  className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white"
-                >
-                  <Minus size={14} />
-                </button>
-                <div className={`w-8 text-center text-xs font-mono font-bold ${item.transpose !== 0 ? 'text-cyan-400' : 'text-slate-500'}`}>
-                  {item.transpose > 0 ? '+' : ''}{item.transpose}
+                  <div className="flex items-center bg-slate-900 rounded border border-slate-800 mr-2">
+                    <button
+                      onClick={() => updateItemTranspose(item.id, item.transpose - 1)}
+                      className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white"
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <div className={`w-8 text-center text-xs font-mono font-bold ${item.transpose !== 0 ? 'text-cyan-400' : 'text-slate-500'}`}>
+                      {item.transpose > 0 ? '+' : ''}{item.transpose}
+                    </div>
+                    <button
+                      onClick={() => updateItemTranspose(item.id, item.transpose + 1)}
+                      className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1 min-w-0 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Type size={14} className="text-slate-500" />
+                    <div className={`font-medium truncate ${TEXT_SIZES[item.size]?.uiClass}`} style={{ color: TEXT_COLORS[item.color]?.hex }}>
+                      {item.content || 'Text Note'}
+                    </div>
+                  </div>
+                  {!isVirtual && (
+                    <button 
+                      onClick={() => handleEditNote(item)}
+                      className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-md mr-2"
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                  )}
                 </div>
-                <button
-                  onClick={() => updateItemTranspose(item.id, item.transpose + 1)}
-                  className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white"
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
+              )}
 
               {!isVirtual && (
-                <button
-                  onClick={() => removeSongFromSetlist(item.id)}
-                  className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-2"
-                >
-                  <Trash2 size={16} />
-                </button>
+                  <button
+                    onClick={() => removeItemFromSetlist(item.id)}
+                    className="text-slate-600 hover:text-red-400 md:opacity-0 group-hover:opacity-100 transition-opacity p-2 ml-auto"
+                  >
+                    <Trash2 size={18} />
+                  </button>
               )}
             </div>
           ))}
@@ -761,8 +1030,9 @@ return (
       </div>
 
       {!isVirtual && (
-        <div className="w-5/12 flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-          <div className="p-4 border-b border-slate-800">
+      <div ref={libraryRef} className="w-full lg:w-5/12 flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden min-h-[400px]">
+          <div className="p-4 border-b border-slate-800 bg-slate-900/50">
+            <h3 className="font-bold text-white mb-3">Song Library</h3>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
               <input
@@ -778,7 +1048,7 @@ return (
           <div className="flex-1 overflow-y-auto p-2 space-y-2">
             {allSongs
               .filter(s =>
-                !setlistItems.find(item => item.song.id === s.id) &&
+                !setlistItems.find(item => item.type === 'song' && item.song.id === s.id) &&
                 (s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                   s.artist.toLowerCase().includes(searchQuery.toLowerCase()))
               )
@@ -791,9 +1061,9 @@ return (
                   </div>
                   <button
                     onClick={() => addSongToSetlist(song)}
-                    className="p-1.5 bg-slate-800 hover:bg-cyan-600 hover:text-white text-cyan-500 rounded-md transition-colors border border-slate-700 hover:border-cyan-500"
+                    className="p-2 sm:p-1.5 bg-slate-800 hover:bg-cyan-600 hover:text-white text-cyan-500 rounded-md transition-colors border border-slate-700 hover:border-cyan-500"
                   >
-                    <Plus size={16} />
+                    <Plus size={18} />
                   </button>
                 </div>
               ))
@@ -803,7 +1073,7 @@ return (
       )}
 
       {isVirtual && (
-        <div className="w-5/12 flex flex-col items-center justify-center bg-slate-900/50 border border-dashed border-slate-800 rounded-xl p-10 text-center">
+        <div className="w-full lg:w-5/12 flex flex-col items-center justify-center bg-slate-900/50 border border-dashed border-slate-800 rounded-xl p-10 text-center">
           <Heart size={48} className="text-pink-500/20 mb-4" />
           <h4 className="text-white font-bold mb-2">Dynamic List</h4>
           <p className="text-slate-500 text-sm leading-relaxed">
@@ -816,30 +1086,5 @@ return (
   </div>
 );
 };
-
-// ── SetlistCard ───────────────────────────────────────────────────────────
-interface SetlistCardProps {
-  list: Setlist;
-  onDelete: (id: string, e: React.MouseEvent) => void;
-  onSelect: (l: Setlist) => void;
-}
-
-const SetlistCard: React.FC<SetlistCardProps> = ({ list, onDelete, onSelect }) => (
-  <div onClick={() => onSelect(list)}
-    className="bg-slate-900 border border-slate-800 rounded-xl p-6 cursor-pointer hover:border-cyan-500/50 transition-all group relative">
-    <div className="flex justify-between items-start">
-      <div>
-        <h3 className="text-xl font-bold text-white mb-1 group-hover:text-cyan-400 transition-colors">{list.title}</h3>
-        <div className="text-xs text-slate-500 flex items-center gap-2">
-          <Calendar size={12} />
-          {new Date(list.created_at).toLocaleDateString()}
-        </div>
-      </div>
-      <button onClick={(e) => onDelete(list.id, e)} className="text-slate-600 hover:text-red-400 p-2">
-        <Trash2 size={18} />
-      </button>
-    </div>
-  </div>
-);
 
 export default SetlistEditor;

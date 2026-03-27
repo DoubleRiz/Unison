@@ -39,6 +39,7 @@ const SongSheet: React.FC<SongSheetProps> = ({
   // View Settings
   const [fontSize, setFontSize] = useState(1.125); 
   const [showChords, setShowChords] = useState(true);
+  const [isPinching, setIsPinching] = useState(false);
 
   // Auto Scroll State & Refs
   const [isScrolling, setIsScrolling] = useState(false);
@@ -94,6 +95,65 @@ const SongSheet: React.FC<SongSheetProps> = ({
     requestRef.current = requestAnimationFrame(animateScroll);
   };
 
+  // Pinch to Zoom Logic
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    let initialDistance = 0;
+    let baseFontSize = 1.125;
+
+    const getDistance = (touches: TouchList) => {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        initialDistance = getDistance(e.touches);
+        setIsPinching(true);
+        // Using a functional update later to avoid reading state here
+        // But we need the starting font size for the current gesture
+        // We can capture it once at the start of the gesture
+        setFontSize(curr => {
+          baseFontSize = curr;
+          return curr;
+        });
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && initialDistance > 0) {
+        // Prevent default browser zoom to owner the gesture for font-scaling
+        if (e.cancelable) e.preventDefault();
+        
+        const currentDistance = getDistance(e.touches);
+        const scale = currentDistance / initialDistance;
+        const newFontSize = baseFontSize * scale;
+        
+        setFontSize(Math.max(0.7, Math.min(newFontSize, 4.0)));
+      }
+    };
+
+    const handleTouchEnd = () => {
+      initialDistance = 0;
+      setIsPinching(false);
+    };
+
+    element.addEventListener('touchstart', handleTouchStart, { passive: false });
+    element.addEventListener('touchmove', handleTouchMove, { passive: false });
+    element.addEventListener('touchend', handleTouchEnd);
+    element.addEventListener('touchcancel', handleTouchEnd);
+
+    return () => {
+      element.removeEventListener('touchstart', handleTouchStart);
+      element.removeEventListener('touchmove', handleTouchMove);
+      element.removeEventListener('touchend', handleTouchEnd);
+      element.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, []);
+
   useEffect(() => {
     const scrollableParent = containerRef.current?.closest('.overflow-y-auto') as HTMLElement;
     
@@ -137,18 +197,19 @@ const SongSheet: React.FC<SongSheetProps> = ({
         return { isSection: true, text: sectionType, segments: [] };
       }
       const parts = line.split(/\[(.*?)\]/g);
-      const segments: { chord: string | null; lyrics: string }[] = [];
-      if (parts[0] !== undefined) segments.push({ chord: null, lyrics: parts[0] });
+      const segments: { chord: string | null; lyrics: string; span: number }[] = [];
+      if (parts[0] !== undefined) segments.push({ chord: null, lyrics: parts[0], span: parts[0].length });
       for (let i = 1; i < parts.length; i += 2) {
         const chord = parts[i];
         const lyrics = parts[i + 1] || ''; 
-        segments.push({ chord, lyrics });
+        // Span = length of chord + 2 (for brackets) + length of following lyrics
+        segments.push({ chord, lyrics, span: chord.length + 2 + lyrics.length });
       }
       return { isSection: false, text: '', segments };
     });
   }, [song.content]);
 
-  const isChordLine = (segments: { chord: string | null; lyrics: string }[]) => {
+  const isChordLine = (segments: { chord: string | null; lyrics: string; span: number }[]) => {
     if (segments.length === 0) return false;
     const hasChord = segments.some(s => s.chord !== null);
     const hasOnlyWhitespaceLyrics = segments.every(s => s.lyrics.trim() === '');
@@ -184,11 +245,9 @@ const SongSheet: React.FC<SongSheetProps> = ({
     const shapeChordName = originalChord ? transpose(originalChord, transposeSemitones) : chordString;
 
     return (
-      <ChordTooltip chord={shapeChordName}>
-        <span className={`whitespace-pre cursor-help font-bold ${!isDegree ? 'text-cyan-600 dark:text-cyan-400' : ''}`}>
-          {content}{'\u00A0'}{'\u00A0'}
-        </span>
-      </ChordTooltip>
+      <span className={`whitespace-pre cursor-default font-bold ${!isDegree ? 'text-cyan-600 dark:text-cyan-400' : ''}`}>
+        {content}
+      </span>
     );
   };
 
@@ -223,14 +282,53 @@ const SongSheet: React.FC<SongSheetProps> = ({
     let cursorY = 40;
     doc.setFont("courier", "normal");
     doc.setFontSize(11);
-    const lines = transposeContent(song.content, transposeSemitones).split('\n');
+    const sanitizePdfText = (text: string) => {
+      return text
+        .replace(/[\u00A0\u2000-\u200b\u202f\u205f\u3000]/g, ' ')
+        .replace(/\t/g, '    ')
+        .replace(/[‘’`]/g, "'")
+        .replace(/[“”]/g, '"')
+        .replace(/…/g, '...')
+        .replace(/œ/g, 'oe').replace(/Œ/g, 'Oe')
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    };
+
+    const lines = transposeContent(song.content, transposeSemitones).split(/\r?\n/);
     lines.forEach(line => {
       if (cursorY > 280) { doc.addPage(); cursorY = 20; }
-      if (getSectionType(line)) {
-        cursorY += 4; doc.setFont("courier", "bold"); doc.text(line.trim().toUpperCase(), margin, cursorY);
-        doc.setFont("courier", "normal"); cursorY += lineHeight; return;
+      
+      const sectionName = getSectionType(line);
+      if (sectionName) {
+        cursorY += 4; 
+        doc.setFont("courier", "bold"); 
+        doc.setTextColor(0, 0, 0);
+        doc.text(sanitizePdfText(line.trim().toUpperCase()), margin, cursorY);
+        doc.setFont("courier", "normal"); 
+        cursorY += lineHeight; 
+        return;
       }
-      doc.text(line.replace(/\[(.*?)\]/g, '$1 '), margin, cursorY);
+
+      // Render line with highlighted chords
+      const parts = line.split(/\[(.*?)\]/g);
+      let currentX = margin;
+      
+      parts.forEach((part, i) => {
+        const isChord = i % 2 === 1;
+        if (isChord) {
+          doc.setFont("courier", "bold");
+          doc.setTextColor(0, 153, 184); // Cyan
+        } else {
+          doc.setFont("courier", "normal");
+          doc.setTextColor(0, 0, 0); // Black
+        }
+        
+        const textToRender = sanitizePdfText(part);
+        if (textToRender) {
+          doc.text(textToRender, currentX, cursorY);
+          currentX += doc.getTextWidth(textToRender);
+        }
+      });
+      
       cursorY += lineHeight;
     });
     doc.save(`${song.title}.pdf`);
@@ -341,7 +439,7 @@ const SongSheet: React.FC<SongSheetProps> = ({
       </div>
 
       {/* Sheet Music Area */}
-      <div className="font-mono select-text transition-all duration-200" style={{ fontSize: `${fontSize}rem` }}>
+      <div className={`font-mono select-text transition-all ${isPinching ? 'duration-0' : 'duration-200'}`} style={{ fontSize: `${fontSize}rem` }}>
         {parsedLines.map((lineObj, lineIdx) => {
           if (lineObj.isSection) {
             return (
@@ -354,27 +452,41 @@ const SongSheet: React.FC<SongSheetProps> = ({
           }
           const line = lineObj.segments;
           const isCurrentLineChords = isChordLine(line);
+          const lineHasAnyChord = line.some(s => s.chord !== null);
           if (!showChords && isCurrentLineChords) return null;
 
           return (
-            <div key={lineIdx} className={`flex flex-wrap items-end ${isCurrentLineChords && showChords ? 'mb-0' : 'mb-2'} min-h-[1.2em]`}>
+            <div key={lineIdx} 
+              className={`flex flex-row flex-nowrap items-end overflow-x-auto whitespace-nowrap ${isCurrentLineChords && showChords ? 'mb-0' : 'mb-2'}`}
+              style={{ display: 'flex', flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'flex-end', minHeight: '1.2em' }}
+            >
               {line.length === 0 || (line.length === 1 && !line[0].chord && !line[0].lyrics) ? (
                 <div className="h-6 w-full"></div>
               ) : (
                 line.map((segment, segIdx) => {
                   const chordString = processChord(segment.chord);
+                  const segmentStyle = { flexShrink: 0, flexBasis: 'auto', minWidth: isCurrentLineChords ? `${segment.span}ch` : 'auto' };
+                  
                   if (isCurrentLineChords) {
                     return (
-                      <div key={segIdx} className="flex">
+                      <div key={segIdx} className="flex flex-row flex-nowrap flex-shrink-0" style={segmentStyle}>
                         {chordString && showChords && renderChordDisplay(chordString, segment.chord)}
                         <span className="whitespace-pre text-slate-500">{segment.lyrics}</span>
                       </div>
                     );
                   }
+
+                  // Inline Rendering for mixed lines
                   return (
-                    <div key={segIdx} className="flex flex-col">
-                      {chordString && showChords && <div className="font-bold text-[0.9em] leading-none select-none mb-1 text-cyan-600 dark:text-cyan-400">{renderChordDisplay(chordString, segment.chord)}</div>}
-                      <div className="text-slate-800 dark:text-slate-300 whitespace-pre leading-none">{renderStyledText(segment.lyrics)}</div>
+                    <div key={segIdx} className="flex flex-row items-baseline flex-shrink-0" style={segmentStyle}>
+                      {chordString && showChords && (
+                        <span className="font-bold text-cyan-600 dark:text-cyan-400 mr-1 select-none">
+                          {renderChordDisplay(chordString, segment.chord)}
+                        </span>
+                      )}
+                      <span className="text-slate-800 dark:text-slate-300 whitespace-pre">
+                        {renderStyledText(segment.lyrics)}
+                      </span>
                     </div>
                   );
                 })

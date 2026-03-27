@@ -122,20 +122,7 @@ const Navbar: React.FC<NavbarProps> = ({
           {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
         </button>
 
-        {session ? (
-          <button 
-            onClick={onNavigateProfile}
-            className="flex items-center gap-2 ml-1"
-          >
-            <div className="w-8 h-8 md:w-9 md:h-9 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center border border-slate-300 dark:border-slate-700 overflow-hidden shadow-sm hover:ring-2 hover:ring-cyan-500 transition-all">
-              {session.user?.user_metadata?.avatar_url ? (
-                <img src={session.user.user_metadata.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
-              ) : (
-                <User size={16} className="text-cyan-600 dark:text-cyan-400" />
-              )}
-            </div>
-          </button>
-        ) : (
+        {!session && (
           <button
             onClick={onOpenAuth}
             className="flex items-center gap-2 px-3 md:px-4 py-1.5 md:py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs md:text-sm font-bold shadow-lg active:scale-95"

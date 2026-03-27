@@ -6,9 +6,10 @@ import { Song } from '../types';
 interface ProfileProps {
   user: any;
   songs: Song[];
+  onNavigateToGroups?: () => void;
 }
 
-const Profile: React.FC<ProfileProps> = ({ user, songs }) => {
+const Profile: React.FC<ProfileProps> = ({ user, songs, onNavigateToGroups }) => {
   const [username, setUsername] = useState(user.user_metadata.full_name || '');
   const [email, setEmail] = useState(user.email || '');
   const [password, setPassword] = useState('');
@@ -96,6 +97,24 @@ const Profile: React.FC<ProfileProps> = ({ user, songs }) => {
             </div>
           </div>
           
+          {onNavigateToGroups && (
+            <button 
+              onClick={onNavigateToGroups}
+              className="w-full bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-800 rounded-xl p-6 hover:border-cyan-500/50 transition-all group flex items-center justify-between"
+            >
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-cyan-100 dark:bg-cyan-900/40 text-cyan-600 dark:text-cyan-400 rounded-2xl group-hover:scale-110 transition-transform">
+                  <Activity size={24} />
+                </div>
+                <div className="text-left">
+                  <div className="text-white font-bold">Band Hub</div>
+                  <div className="text-xs text-slate-500">Collaborate with your groups</div>
+                </div>
+              </div>
+              <Activity className="text-slate-600 group-hover:text-cyan-500 transition-colors" size={20} />
+            </button>
+          )}
+
            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
              <div className="w-full h-32 bg-slate-800/50 rounded-lg flex items-center justify-center text-slate-600 mb-3">
                <User size={48} />

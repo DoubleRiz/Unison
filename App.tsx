@@ -304,12 +304,13 @@ const App: React.FC = () => {
             setTranspose(0);
             setInitialSearchQuery(''); 
           }}
+          onAddSong={createNewSong}
         />
       );
     }
 
     if (currentView === 'profile') {
-      return session ? <Profile user={session.user} songs={songs} /> : <AuthRequiredState title="Member Area" desc="Create an account to manage your profile, track your repertoire and sync across devices." />;
+      return session ? <Profile user={session.user} songs={songs} onNavigateToGroups={() => setCurrentView('groups')} /> : <AuthRequiredState title="Member Area" desc="Create an account to manage your profile, track your repertoire and sync across devices." />;
     }
 
     if (currentView === 'setlists') {
