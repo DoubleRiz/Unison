@@ -2,31 +2,33 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Song, Setlist, NotationMode, Group } from '../types';
 import { supabase } from '../lib/supabaseClient';
-import { 
-  Plus, 
-  Trash2, 
-  FileDown, 
-  GripVertical, 
-  Search, 
-  ChevronLeft, 
+import {
+  Plus,
+  Trash2,
+  FileDown,
+  GripVertical,
+  Search,
+  ChevronLeft,
   Calendar,
   Play,
   Minus,
   Edit2,
   X,
   ChevronRight,
-  Maximize2,
-  Minimize2,
   Users,
   User,
   AlertTriangle,
   Hash,
   Type,
-  Heart
+  AlignLeft,
+  Check,
+  Heart,
+  ChevronUp,
+  ChevronDown
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import SongSheet from './SongSheet';
-import { transposeContent, transpose } from '../utils/musicLogic';
+import { transposeContent, transpose, getSectionType } from '../utils/musicLogic';
 
 const FAVORITES_ID = 'virtual_favorites';
 
@@ -37,47 +39,172 @@ interface SetlistEditorProps {
   onBack: () => void;
 }
 
-interface SetlistItem {
-  id: string; // ID from setlist_songs table or song_id for virtuals
+// ── Types ──────────────────────────────────────────────────────────────────
+interface SongItem {
+  type: 'song';
+  id: string;
   song: Song;
   transpose: number;
 }
 
+
+interface TextItem {
+  type: 'text';
+  id: string;
+  content: string;
+  color: string;          // 'default' | 'amber' | 'cyan' | 'purple' | 'red'
+  size: 'sm' | 'md' | 'lg';
+}
+
+type SetlistItem = SongItem | TextItem;
+
+// ── Design tokens for text blocks ─────────────────────────────────────────
+type RGBTuple = [number, number, number];
+
+const TEXT_COLORS: Record<string, { label: string; hex: string; pdfRgb: RGBTuple; borderRgb: RGBTuple }> = {
+  default: { label: 'White', hex: '#94a3b8', pdfRgb: [50, 50, 50], borderRgb: [150, 150, 150] },
+  amber: { label: 'Amber', hex: '#f59e0b', pdfRgb: [161, 85, 0], borderRgb: [217, 119, 6] },
+  cyan: { label: 'Cyan', hex: '#06b6d4', pdfRgb: [0, 120, 150], borderRgb: [8, 145, 178] },
+  purple: { label: 'Purple', hex: '#a855f7', pdfRgb: [100, 40, 180], borderRgb: [147, 51, 234] },
+  red: { label: 'Red', hex: '#ef4444', pdfRgb: [190, 30, 30], borderRgb: [220, 38, 38] },
+};
+
+const TEXT_SIZES: Record<string, { label: string; description: string; pdfFontSize: number; pdfLineSpacing: number; uiClass: string }> = {
+  sm: { label: 'S', description: 'Small', pdfFontSize: 9, pdfLineSpacing: 5, uiClass: 'text-xs' },
+  md: { label: 'M', description: 'Medium', pdfFontSize: 12, pdfLineSpacing: 7, uiClass: 'text-sm' },
+  lg: { label: 'L', description: 'Large', pdfFontSize: 17, pdfLineSpacing: 10, uiClass: 'text-base font-semibold' },
+};
+
+// ── localStorage helpers ───────────────────────────────────────────────────
+const generateId = () => `txt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+const getOrderKey = (setlistId: string) => `setlist_full_order_${setlistId}`;
+
+const saveFullOrder = (setlistId: string, items: SetlistItem[]) => {
+  const orderData = items.map(item => ({
+    type: item.type,
+    id: item.id,
+    ...(item.type === 'text' ? { content: item.content, color: item.color, size: item.size } : {}),
+  }));
+  localStorage.setItem(getOrderKey(setlistId), JSON.stringify(orderData));
+};
+
+type StoredEntry = { type: string; id: string; content?: string; color?: string; size?: string };
+
+const loadFullOrder = (setlistId: string): StoredEntry[] => {
+  try {
+    const raw = localStorage.getItem(getOrderKey(setlistId));
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+};
+
+// ── SetlistCard ───────────────────────────────────────────────────────────
+interface SetlistCardProps {
+  list: Setlist;
+  onDelete: (id: string, e: React.MouseEvent) => void;
+  onSelect: (l: Setlist) => void;
+}
+
+const SetlistCard: React.FC<SetlistCardProps> = ({ list, onDelete, onSelect }) => (
+  <div onClick={() => onSelect(list)}
+    className="bg-slate-900 border border-slate-800 rounded-xl p-6 cursor-pointer hover:border-cyan-500/50 transition-all group relative">
+    <div className="flex justify-between items-start">
+      <div>
+        <h3 className="text-xl font-bold text-white mb-1 group-hover:text-cyan-400 transition-colors">{list.title}</h3>
+        <div className="text-xs text-slate-500 flex items-center gap-2">
+          <Calendar size={12} />
+          {new Date(list.created_at).toLocaleDateString()}
+        </div>
+      </div>
+      <button onClick={(e) => onDelete(list.id, e)} className="text-slate-600 hover:text-red-400 p-2">
+        <Trash2 size={18} />
+      </button>
+    </div>
+  </div>
+);
+
+// ──────────────────────────────────────────────────────────────────────────
 const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, onBack }) => {
   const [setlists, setSetlists] = useState<Setlist[]>([]);
   const [currentSetlist, setCurrentSetlist] = useState<Setlist | null>(null);
   const [setlistItems, setSetlistItems] = useState<SetlistItem[]>([]);
-  
-  // UI State
+
   const [newTitle, setNewTitle] = useState('');
-  const [selectedGroupId, setSelectedGroupId] = useState<string>(''); // '' = Personal
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState('');
-  
-  // Notation Mode (New Feature)
-  const [notationMode, setNotationMode] = useState<NotationMode>(NotationMode.LETTERS);
 
-  // Delete Modal State
+  // Scroll to library helper
+  const libraryRef = useRef<HTMLDivElement>(null);
+  const jumpToLibrary = () => {
+    libraryRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // Text block editing state
+  const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  const [editingTextValue, setEditingTextValue] = useState('');
+  const [editingTextColor, setEditingTextColor] = useState<string>('amber');
+  const [editingTextSize, setEditingTextSize] = useState<'sm' | 'md' | 'lg'>('md');
+
+  const handleAddTextNote = () => {
+    setEditingTextId('new');
+    setEditingTextValue('');
+    setEditingTextColor('amber');
+    setEditingTextSize('md');
+  };
+
+  const handleEditNote = (item: TextItem) => {
+    setEditingTextId(item.id);
+    setEditingTextValue(item.content);
+    setEditingTextColor(item.color);
+    setEditingTextSize(item.size);
+  };
+
+  const saveTextNote = () => {
+    if (!editingTextValue.trim() || !currentSetlist || currentSetlist.id === FAVORITES_ID) {
+      setEditingTextId(null);
+      return;
+    }
+    
+    if (editingTextId === 'new') {
+      const newNote: TextItem = {
+        type: 'text',
+        id: generateId(),
+        content: editingTextValue.trim(),
+        color: editingTextColor,
+        size: editingTextSize
+      };
+      const newItems = [...setlistItems, newNote];
+      setSetlistItems(newItems);
+      saveFullOrder(currentSetlist.id, newItems);
+    } else {
+      const newItems = setlistItems.map(item => 
+        item.id === editingTextId && item.type === 'text' 
+          ? { ...item, content: editingTextValue.trim(), color: editingTextColor, size: editingTextSize } 
+          : item
+      );
+      setSetlistItems(newItems);
+      saveFullOrder(currentSetlist.id, newItems);
+    }
+    setEditingTextId(null);
+  };
+
+  const [notationMode, setNotationMode] = useState<NotationMode>(NotationMode.LETTERS);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [setlistToDelete, setSetlistToDelete] = useState<string | null>(null);
-
-  // Performance Mode
   const [performanceMode, setPerformanceMode] = useState(false);
   const [performanceIndex, setPerformanceIndex] = useState(0);
-
-  // PDF Export Modal
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfTitle, setPdfTitle] = useState('');
 
-  // Drag and Drop State
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
 
-  useEffect(() => {
-    fetchSetlists();
-  }, [user]);
+  useEffect(() => { fetchSetlists(); }, [user]);
 
   useEffect(() => {
     if (currentSetlist) {
@@ -86,16 +213,14 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     }
   }, [currentSetlist]);
 
+  // ── Data fetching ────────────────────────────────────────────────────────
   const fetchSetlists = async () => {
     setLoading(true);
     const { data, error } = await supabase
       .from('setlists')
       .select('*')
       .order('created_at', { ascending: false });
-    
-    if (!error && data) {
-      setSetlists(data);
-    }
+    if (!error && data) setSetlists(data);
     setLoading(false);
   };
 
@@ -104,6 +229,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
       const favorites = allSongs
         .filter(s => s.is_favorite)
         .map(song => ({
+          type: 'song' as const,
           id: `fav_${song.id}`,
           song: song,
           transpose: 0
@@ -119,39 +245,44 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
       .order('position', { ascending: true });
 
     if (!error && data) {
-      const items = data.map((item: any) => {
+      const songItems: SongItem[] = data.map((item: any) => {
         const song = allSongs.find(s => s.id === item.song_id);
         if (!song) return null;
-        return {
-          id: item.id,
-          song: song,
-          transpose: item.transpose || 0
-        };
-      }).filter(Boolean) as SetlistItem[];
-      
-      setSetlistItems(items);
+        return { type: 'song' as const, id: item.id, song, transpose: item.transpose || 0 };
+      }).filter(Boolean) as SongItem[];
+
+      const savedOrder = loadFullOrder(setlistId);
+      if (savedOrder.length === 0) { setSetlistItems(songItems); return; }
+
+      const songMap = new Map(songItems.map(s => [s.id, s]));
+      const merged: SetlistItem[] = [];
+
+      savedOrder.forEach(entry => {
+        if (entry.type === 'song') {
+          const s = songMap.get(entry.id);
+          if (s) { merged.push(s); songMap.delete(entry.id); }
+        } else if (entry.type === 'text') {
+          merged.push({
+            type: 'text',
+            id: entry.id,
+            content: entry.content || '',
+            color: entry.color || 'amber',
+            size: (entry.size as 'sm' | 'md' | 'lg') || 'md',
+          });
+        }
+      });
+      songMap.forEach(s => merged.push(s));
+      setSetlistItems(merged);
     }
   };
 
+  // ── Setlist CRUD ─────────────────────────────────────────────────────────
   const handleCreateSetlist = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
-
-    const payload: any = { 
-      title: newTitle, 
-      user_id: user.id 
-    };
-
-    if (selectedGroupId) {
-      payload.group_id = selectedGroupId;
-    }
-
-    const { data, error } = await supabase
-      .from('setlists')
-      .insert([payload])
-      .select()
-      .single();
-
+    const payload: any = { title: newTitle, user_id: user.id };
+    if (selectedGroupId) payload.group_id = selectedGroupId;
+    const { data, error } = await supabase.from('setlists').insert([payload]).select().single();
     if (!error && data) {
       setSetlists([data, ...setlists]);
       setNewTitle('');
@@ -162,7 +293,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
 
   const handleUpdateSetlistTitle = async () => {
     if (!currentSetlist || currentSetlist.id === FAVORITES_ID || !editTitleValue.trim()) return;
-    
+
     const { error } = await supabase
       .from('setlists')
       .update({ title: editTitleValue })
@@ -184,12 +315,12 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
 
   const executeDeleteSetlist = async () => {
     if (!setlistToDelete) return;
-    
+
     // Correctly use the setSetlistToDelete setter instead of calling the state value itself.
     await supabase.from('setlists').delete().eq('id', setlistToDelete);
+    localStorage.removeItem(getOrderKey(setlistToDelete));
     setSetlists(setlists.filter(s => s.id !== setlistToDelete));
     if (currentSetlist?.id === setlistToDelete) setCurrentSetlist(null);
-    
     setShowDeleteModal(false);
     setSetlistToDelete(null);
   };
@@ -200,38 +331,28 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     setPerformanceMode(false);
   };
 
+  // ── Song management ──────────────────────────────────────────────────────
   const addSongToSetlist = async (song: Song) => {
     if (!currentSetlist || currentSetlist.id === FAVORITES_ID) return;
 
-    if (setlistItems.find(item => item.song.id === song.id)) {
+    if (setlistItems.some(item => item.type === 'song' && item.song.id === song.id)) {
       alert("Song already in setlist");
       return;
     }
-
-    const newPosition = setlistItems.length;
-    const { data, error } = await supabase
-      .from('setlist_songs')
-      .insert({
-        setlist_id: currentSetlist.id,
-        song_id: song.id,
-        position: newPosition,
-        transpose: 0
-      })
-      .select()
-      .single();
-
+    const songCount = setlistItems.filter(i => i.type === 'song').length;
+    const { data, error } = await supabase.from('setlist_songs')
+      .insert({ setlist_id: currentSetlist.id, song_id: song.id, position: songCount, transpose: 0 })
+      .select().single();
     if (!error && data) {
-      setSetlistItems([...setlistItems, {
-        id: data.id,
-        song: song,
-        transpose: 0
-      }]);
+      const newItems = [...setlistItems, { type: 'song' as const, id: data.id, song, transpose: 0 }];
+      setSetlistItems(newItems);
+      saveFullOrder(currentSetlist.id, newItems);
     }
   };
 
-  const removeSongFromSetlist = async (itemId: string) => {
+  const removeItemFromSetlist = async (itemId: string) => {
     if (currentSetlist?.id === FAVORITES_ID) return;
-    
+
     await supabase
       .from('setlist_songs')
       .delete()
@@ -241,7 +362,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   };
 
   const updateItemTranspose = async (itemId: string, newTranspose: number) => {
-    setSetlistItems(items => items.map(item => 
+    setSetlistItems(items => items.map(item =>
       item.id === itemId ? { ...item, transpose: newTranspose } : item
     ));
 
@@ -264,6 +385,23 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     dragOverItem.current = position;
   };
 
+  const updateAllPositions = async (items: SetlistItem[]) => {
+    if (!currentSetlist) return;
+    saveFullOrder(currentSetlist.id, items);
+    const songUpdates = items
+      .filter((item): item is SongItem => item.type === 'song')
+      .map((item, index) => ({
+        id: item.id,
+        setlist_id: currentSetlist.id,
+        song_id: item.song.id,
+        position: index,
+        transpose: item.transpose
+      }));
+    if (songUpdates.length > 0) {
+      await supabase.from('setlist_songs').upsert(songUpdates);
+    }
+  };
+
   const handleDragEnd = async (e: React.DragEvent<HTMLDivElement>) => {
     if (currentSetlist?.id === FAVORITES_ID) return;
     e.currentTarget.classList.remove('opacity-50');
@@ -278,561 +416,675 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     dragItem.current = null;
     dragOverItem.current = null;
     setSetlistItems(newItems);
+    await updateAllPositions(newItems);
+  };
 
-    const updates = newItems.map((item, index) => ({
-      id: item.id,
-      setlist_id: currentSetlist.id,
-      song_id: item.song.id,
-      position: index,
-      transpose: item.transpose
-    }));
-    
-    await supabase.from('setlist_songs').upsert(updates);
+  const moveItem = async (fromIndex: number, toIndex: number) => {
+    if (toIndex < 0 || toIndex >= setlistItems.length || !currentSetlist || isVirtual) return;
+    const newItems = [...setlistItems];
+    const item = newItems[fromIndex];
+    newItems.splice(fromIndex, 1);
+    newItems.splice(toIndex, 0, item);
+    setSetlistItems(newItems);
+    await updateAllPositions(newItems);
   };
 
   const startPerformance = () => {
-    if (setlistItems.length > 0) {
-      setPerformanceIndex(0);
-      setPerformanceMode(true);
-    }
+    if (setlistItems.length > 0) { setPerformanceIndex(0); setPerformanceMode(true); }
   };
 
+  // ── PDF Export ────────────────────────────────────────────────────────────
   const exportToPDF = () => {
-    if (!currentSetlist) return;
+    if (!currentSetlist || setlistItems.length === 0) return;
     setShowPdfModal(false);
-    
+
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.width;
     const pageHeight = doc.internal.pageSize.height;
-    const margin = 10;
-    const lineHeight = 6;
-    
+    const margin = 15;
+    const contentWidth = pageWidth - (margin * 2);
+    const songLineH = 5.2;
+
+    const newPage = () => {
+      doc.addPage();
+      return 20; 
+    };
+
+    let cursorY = 20;
+
+    const sanitizePdfText = (text: string) => {
+      return text
+        .replace(/[\u00A0\u2000-\u200b\u202f\u205f\u3000]/g, ' ')
+        .replace(/\t/g, '    ')
+        .replace(/[‘’`]/g, "'")
+        .replace(/[“”]/g, '"')
+        .replace(/…/g, '...')
+        .replace(/œ/g, 'oe').replace(/Œ/g, 'Oe')
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    };
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(150);
+    doc.text(pdfTitle, margin, 10);
+    doc.text(`Setlist Export`, pageWidth - margin, 10, { align: 'right' });
+
     setlistItems.forEach((item, index) => {
-      if (index > 0) doc.addPage();
-      
+      if (item.type === 'text') {
+        const color = TEXT_COLORS[item.color] || TEXT_COLORS.default;
+        const size = TEXT_SIZES[item.size] || TEXT_SIZES.md;
+        
+        doc.setFontSize(size.pdfFontSize);
+        doc.setTextColor(color.pdfRgb[0], color.pdfRgb[1], color.pdfRgb[2]);
+        doc.setFont("helvetica", "bold");
+        
+        const lines = doc.splitTextToSize(item.content, contentWidth);
+        const textHeightTotal = lines.length * size.pdfLineSpacing;
+        
+        if (cursorY + textHeightTotal > pageHeight - margin) cursorY = newPage();
+        
+        lines.forEach((line: string) => {
+          if (cursorY > pageHeight - margin) cursorY = newPage();
+          doc.text(line, margin, cursorY);
+          cursorY += size.pdfLineSpacing;
+        });
+        
+        cursorY += 10;
+        return;
+      }
+
       const song = item.song;
-      
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(150);
-      doc.text(pdfTitle, margin, 10);
-      doc.text(`Page ${index + 1}/${setlistItems.length}`, pageWidth - margin, 10, { align: 'right' });
+
+      if (cursorY + 30 > pageHeight - margin) cursorY = newPage();
 
       doc.setFontSize(24);
       doc.setTextColor(0);
       doc.setFont("helvetica", "bold");
-      doc.text(song.title, margin, 25);
-      
+      doc.text(song.title, margin, cursorY);
+      cursorY += 7;
+
       doc.setFontSize(12);
       doc.setFont("helvetica", "normal");
-      const keyText = item.transpose !== 0 
+      const keyText = item.transpose !== 0
         ? `${song.key} (${item.transpose > 0 ? '+' : ''}${item.transpose}) -> ${transpose(song.key, item.transpose)}`
         : song.key;
-        
-      doc.text(`${song.artist} • ${keyText}${song.bpm ? ` • ${song.bpm} BPM` : ''}`, margin, 32);
-      
-      doc.setFont("courier", "normal"); 
+
+      doc.text(`${song.artist} • ${keyText}`, margin, cursorY);
+      cursorY += 13;
+
+      doc.setFont("courier", "normal");
       doc.setFontSize(11);
-      
-      let cursorY = 45;
+
       const transposedContent = transposeContent(song.content, item.transpose);
-      const lines = transposedContent.split('\n');
+      const lines = transposedContent.split(/\r?\n/);
 
       lines.forEach(line => {
         if (cursorY > pageHeight - margin) {
-          doc.addPage();
-          cursorY = 20;
+          cursorY = newPage();
         }
 
-        const isSection = /^\[(Intro|Verse|Chorus|Refrain|Bridge|Pont|Pre-Chorus|Outro|Solo|Instrumental|Couplet).*\]$/i.test(line.trim());
-
-        if (isSection) {
-          cursorY += 4;
+        const sectionName = getSectionType(line);
+        if (sectionName) {
+          cursorY += 3;
           doc.setFont("courier", "bold");
-          doc.setTextColor(100); 
-          const sectionText = line.trim().replace('[', '').replace(']', '').toUpperCase();
-          doc.text(sectionText, margin, cursorY);
+          doc.setFontSize(11);
+          doc.setTextColor(0, 0, 0);
+          doc.text(sanitizePdfText(line.trim().toUpperCase()), margin, cursorY);
           doc.setFont("courier", "normal");
-          doc.setTextColor(0);
-          cursorY += lineHeight;
+          doc.setTextColor(0, 0, 0);
+          cursorY += songLineH;
           return;
         }
 
-        let cursorX = margin;
-        const segments = line.split(/(\[.*?\])/g);
-
-        segments.forEach(seg => {
-           if (seg.startsWith('[') && seg.endsWith(']')) {
-             const chord = seg.slice(1, -1); 
-             doc.setFont("courier", "bold");
-             doc.text(chord, cursorX, cursorY);
-             cursorX += doc.getTextWidth(chord);
-             doc.setFont("courier", "normal"); 
-           } else {
-             doc.text(seg, cursorX, cursorY);
-             cursorX += doc.getTextWidth(seg);
-           }
+        // Render line with highlighted chords
+        const parts = line.split(/\[(.*?)\]/g);
+        let currentX = margin;
+        doc.setFontSize(11);
+        
+        parts.forEach((part, i) => {
+          const isChord = i % 2 === 1;
+          if (isChord) {
+            doc.setFont("courier", "bold");
+            doc.setTextColor(0, 153, 184); // Cyan
+          } else {
+            doc.setFont("courier", "normal");
+            doc.setTextColor(0, 0, 0); // Black
+          }
+          
+          const textToRender = sanitizePdfText(part);
+          if (textToRender) {
+            doc.text(textToRender, currentX, cursorY);
+            currentX += doc.getTextWidth(textToRender);
+          }
         });
 
-        cursorY += lineHeight;
+        cursorY += songLineH;
       });
+
+      if (song.notes?.trim()) {
+        cursorY += 5;
+        if (cursorY > pageHeight - margin - 15) cursorY = newPage();
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.setTextColor(130, 130, 130);
+        doc.text('NOTES', margin, cursorY);
+        cursorY += 4;
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.splitTextToSize(song.notes, contentWidth).forEach((nl: string) => {
+          if (cursorY > pageHeight - margin) cursorY = newPage();
+          doc.text(nl, margin, cursorY);
+          cursorY += 4.5;
+        });
+      }
+      
+      cursorY += 15;
     });
 
     doc.save(`${pdfTitle}.pdf`);
   };
 
-  const favoriteSetlist: Setlist = {
-    id: FAVORITES_ID,
-    user_id: user.id,
-    title: 'My Favorites',
-    created_at: new Date().toISOString()
-  };
+const favoriteSetlist: Setlist = {
+  id: FAVORITES_ID,
+  user_id: user.id,
+  title: 'My Favorites',
+  created_at: new Date().toISOString()
+};
 
-  if (performanceMode && currentSetlist) {
-    const currentItem = setlistItems[performanceIndex];
-    return (
-      <div className="fixed inset-0 bg-slate-950 z-50 flex flex-col">
-        <div className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 shrink-0">
-          <div className="flex items-center gap-4">
-             <button onClick={() => setPerformanceMode(false)} className="text-slate-400 hover:text-white">
-               <X size={24} />
-             </button>
-             <div>
-               <h2 className="text-lg font-bold text-white leading-tight">{currentSetlist.title}</h2>
-               <div className="text-xs text-slate-400">
-                 Song {performanceIndex + 1} of {setlistItems.length}
-               </div>
-             </div>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            <button 
-                onClick={() => setNotationMode(m => m === NotationMode.LETTERS ? NotationMode.DEGREES : NotationMode.LETTERS)}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 text-sm font-medium text-slate-300 hover:text-white transition-colors"
-                title="Toggle Notation"
-            >
-                {notationMode === NotationMode.LETTERS ? <Hash size={18} /> : <Type size={18} />}
-                <span className="hidden sm:inline">{notationMode === NotationMode.LETTERS ? 'Letters' : 'Degrees'}</span>
-            </button>
-
-            <div className="h-8 w-px bg-slate-800 mx-2"></div>
-
-            <button 
-              disabled={performanceIndex === 0}
-              onClick={() => setPerformanceIndex(p => p - 1)}
-              className="p-2 rounded-full bg-slate-800 text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-cyan-600 transition-colors"
-            >
-              <ChevronLeft size={24} />
-            </button>
-            <div className="text-xl font-mono text-cyan-400 font-bold w-8 text-center">
-               {performanceIndex + 1}
-            </div>
-            <button 
-              disabled={performanceIndex === setlistItems.length - 1}
-              onClick={() => setPerformanceIndex(p => p + 1)}
-              className="p-2 rounded-full bg-slate-800 text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-cyan-600 transition-colors"
-            >
-              <ChevronRight size={24} />
-            </button>
+if (performanceMode && currentSetlist) {
+  const currentItem = setlistItems[performanceIndex];
+  return (
+    <div className="fixed inset-0 bg-slate-950 z-50 flex flex-col">
+      <div className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+          <button onClick={() => setPerformanceMode(false)} className="text-slate-400 hover:text-white shrink-0"><X size={24} /></button>
+          <div className="min-w-0">
+            <h2 className="text-base sm:text-lg font-bold text-white leading-tight truncate">{currentSetlist.title}</h2>
+            <div className="text-[10px] sm:text-xs text-slate-400">{performanceIndex + 1} / {setlistItems.length}</div>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-6 scroll-smooth bg-slate-950">
-           <div className="max-w-4xl mx-auto">
-             <SongSheet 
-               song={currentItem.song} 
-               transposeSemitones={currentItem.transpose} 
-               notationMode={notationMode}
-             />
-           </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!currentSetlist) {
-    const personalSetlists = setlists.filter(s => !s.group_id);
-    const groupSetlists = groups.map(g => ({
-      group: g,
-      lists: setlists.filter(s => s.group_id === g.id)
-    })).filter(g => g.lists.length > 0);
-
-    return (
-      <div className="max-w-4xl mx-auto pb-20">
-        {showDeleteModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-sm w-full shadow-2xl">
-              <div className="flex flex-col items-center text-center mb-6">
-                <div className="w-12 h-12 bg-red-900/20 text-red-500 rounded-full flex items-center justify-center mb-4">
-                  <AlertTriangle size={24} />
-                </div>
-                <h3 className="text-xl font-bold text-white mb-2">Delete Setlist?</h3>
-                <p className="text-slate-400 text-sm">
-                  Are you sure you want to delete this setlist? This action cannot be undone.
-                </p>
-              </div>
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => setShowDeleteModal(false)}
-                  className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-medium transition-colors"
-                >
-                  Cancel
-                </button>
-                <button 
-                  onClick={executeDeleteSetlist}
-                  className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="mb-8 border-b border-slate-800 pb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-white mb-2">My Setlists</h1>
-            <p className="text-slate-400">Organize your songs for gigs and rehearsals.</p>
-          </div>
-          <button onClick={onBack} className="text-slate-400 hover:text-white flex items-center gap-2">
-            <ChevronLeft size={20} /> Back
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setNotationMode(m => m === NotationMode.LETTERS ? NotationMode.DEGREES : NotationMode.LETTERS)}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 text-sm font-medium text-slate-300 hover:text-white transition-colors"
+          >
+            {notationMode === NotationMode.LETTERS ? <Hash size={18} /> : <Type size={18} />}
+            <span className="hidden sm:inline">{notationMode === NotationMode.LETTERS ? 'Letters' : 'Degrees'}</span>
+          </button>
+          <div className="h-8 w-px bg-slate-800 mx-2" />
+          <button disabled={performanceIndex === 0} onClick={() => setPerformanceIndex(p => p - 1)}
+            className="p-2 rounded-full bg-slate-800 text-white disabled:opacity-30 hover:bg-cyan-600 transition-colors">
+            <ChevronLeft size={24} />
+          </button>
+          <div className="text-xl font-mono text-cyan-400 font-bold w-8 text-center">{performanceIndex + 1}</div>
+          <button disabled={performanceIndex === setlistItems.length - 1} onClick={() => setPerformanceIndex(p => p + 1)}
+            className="p-2 rounded-full bg-slate-800 text-white disabled:opacity-30 hover:bg-cyan-600 transition-colors">
+            <ChevronRight size={24} />
           </button>
         </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-8">
-            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Create New Setlist</h3>
-            <form onSubmit={handleCreateSetlist} className="flex gap-2">
-              <input 
-                type="text" 
-                placeholder="Gig at The Pub..." 
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-cyan-500"
-              />
-              {groups.length > 0 && (
-                <select
-                  value={selectedGroupId}
-                  onChange={(e) => setSelectedGroupId(e.target.value)}
-                  className="bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-cyan-500"
-                >
-                  <option value="">Personal</option>
-                  {groups.map(g => (
-                    <option key={g.id} value={g.id}>{g.name}</option>
-                  ))}
-                </select>
-              )}
-              <button type="submit" className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 rounded-lg flex items-center gap-2 font-medium">
-                <Plus size={20} /> Create
-              </button>
-            </form>
-          </div>
-
-        <div className="space-y-8">
-          <div>
-            <h3 className="text-white font-bold mb-4 flex items-center gap-2">
-              <User size={18} className="text-cyan-400" /> Personal
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* VIRTUAL FAVORITES CARD */}
-              <div 
-                onClick={() => handleSelectSetlist(favoriteSetlist)}
-                className="bg-gradient-to-br from-pink-900/40 to-slate-900 border border-pink-500/30 rounded-xl p-6 cursor-pointer hover:border-pink-500 transition-all group relative overflow-hidden"
-              >
-                <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform duration-500">
-                  <Heart size={100} fill="currentColor" className="text-pink-500" />
-                </div>
-                <div className="flex justify-between items-start relative z-10">
-                  <div>
-                    <h3 className="text-xl font-bold text-white mb-1 group-hover:text-pink-400 transition-colors flex items-center gap-2">
-                      <Heart size={20} fill="currentColor" className="text-pink-500 animate-pulse" /> My Favorites
-                    </h3>
-                    <div className="text-xs text-slate-500 flex items-center gap-2">
-                      Dynamic List • {allSongs.filter(s => s.is_favorite).length} songs
-                    </div>
-                  </div>
+      </div>
+      <div className="flex-1 overflow-y-auto p-6 scroll-smooth bg-slate-950">
+        <div className="max-w-4xl mx-auto">
+          {currentItem.type === 'song' ? (
+            <SongSheet
+              song={currentItem.song}
+              transposeSemitones={currentItem.transpose}
+              notationMode={notationMode}
+            />
+          ) : (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 min-h-[400px] flex items-center justify-center text-center">
+              <div className="max-w-2xl">
+                <div className={`text-2xl font-bold mb-4 ${TEXT_SIZES[currentItem.size]?.uiClass || ''}`} style={{ color: TEXT_COLORS[currentItem.color]?.hex || '#fff' }}>
+                  {currentItem.content}
                 </div>
               </div>
-
-              {personalSetlists.map(list => (
-                 <SetlistCard key={list.id} list={list} onDelete={confirmDeleteSetlist} onSelect={handleSelectSetlist} />
-              ))}
             </div>
-          </div>
-
-          {groupSetlists.map(g => (
-            <div key={g.group.id}>
-              <h3 className="text-white font-bold mb-4 flex items-center gap-2">
-                <Users size={18} className="text-cyan-400" /> {g.group.name}
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {g.lists.map(list => (
-                   <SetlistCard key={list.id} list={list} onDelete={confirmDeleteSetlist} onSelect={handleSelectSetlist} />
-                ))}
-              </div>
-            </div>
-          ))}
+          )}
         </div>
       </div>
-    );
-  }
+    </div>
+  );
+}
 
-  const isVirtual = currentSetlist.id === FAVORITES_ID;
+if (!currentSetlist) {
+  const personalSetlists = setlists.filter(s => !s.group_id);
+  const groupSetlists = groups.map(g => ({
+    group: g, lists: setlists.filter(s => s.group_id === g.id)
+  })).filter(g => g.lists.length > 0);
 
   return (
-    <div className="max-w-6xl mx-auto h-[calc(100vh-140px)] flex flex-col relative">
-      {showPdfModal && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
-           <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl w-96 shadow-2xl">
-              <h3 className="text-xl font-bold text-white mb-4">Export PDF</h3>
-              <div className="mb-4">
-                <label className="block text-xs font-medium text-slate-400 mb-1">PDF Title</label>
-                <input 
-                  type="text" 
-                  value={pdfTitle}
-                  onChange={(e) => setPdfTitle(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500"
-                />
+    <div className="max-w-4xl mx-auto pb-20">
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-sm w-full shadow-2xl">
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="w-12 h-12 bg-red-900/20 text-red-500 rounded-full flex items-center justify-center mb-4">
+                <AlertTriangle size={24} />
               </div>
-              <div className="flex justify-end gap-2">
-                 <button onClick={() => setShowPdfModal(false)} className="px-4 py-2 text-slate-400 hover:text-white">Cancel</button>
-                 <button onClick={exportToPDF} className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg flex items-center gap-2">
-                   <FileDown size={16} /> Export
-                 </button>
-              </div>
-           </div>
+              <h3 className="text-xl font-bold text-white mb-2">Delete Setlist?</h3>
+              <p className="text-slate-400 text-sm">Are you sure? This action cannot be undone.</p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setShowDeleteModal(false)}
+                className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-medium transition-colors">Cancel</button>
+              <button onClick={executeDeleteSetlist}
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors">Delete</button>
+            </div>
+          </div>
         </div>
       )}
 
-      <div className="mb-6 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-4">
-          <button onClick={() => setCurrentSetlist(null)} className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-white">
-            <ChevronLeft size={20} />
-          </button>
-          
-          <div className="flex items-center gap-2">
-            {isEditingTitle && !isVirtual ? (
-              <form 
-                onSubmit={(e) => { e.preventDefault(); handleUpdateSetlistTitle(); }}
-                className="flex items-center gap-2"
-              >
-                <input
-                  autoFocus
-                  type="text"
-                  value={editTitleValue}
-                  onChange={(e) => setEditTitleValue(e.target.value)}
-                  onBlur={handleUpdateSetlistTitle}
-                  className="bg-slate-950 border border-cyan-500 rounded px-2 py-1 text-xl font-bold text-white focus:outline-none"
-                />
-              </form>
-            ) : (
-              <div className="flex items-center gap-3 group">
-                <h1 className="text-2xl font-bold text-white cursor-pointer flex items-center gap-3" onClick={() => !isVirtual && setIsEditingTitle(true)}>
-                  {isVirtual && <Heart size={24} className="text-pink-500" fill="currentColor" />}
-                  {currentSetlist.title}
-                </h1>
-                {!isVirtual && (
-                  <button onClick={() => setIsEditingTitle(true)} className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-cyan-400 transition-opacity">
-                     <Edit2 size={16} />
-                  </button>
-                )}
-              </div>
-            )}
-            
-            {currentSetlist.group_id && (
-              <span className="px-2 py-0.5 rounded-full bg-purple-900/30 text-purple-400 text-xs border border-purple-800/50 flex items-center gap-1">
-                <Users size={12} />
-                Group Setlist
-              </span>
-            )}
-
-            {isVirtual && (
-              <span className="px-2 py-0.5 rounded-full bg-pink-900/30 text-pink-400 text-xs border border-pink-800/50 flex items-center gap-1">
-                Smart List
-              </span>
-            )}
-          </div>
+      <div className="mb-8 border-b border-slate-800 pb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-white mb-2">My Setlists</h1>
+          <p className="text-slate-400">Organize your songs for gigs and rehearsals.</p>
         </div>
-        
-        <div className="flex gap-3">
-            <button 
-                onClick={() => setNotationMode(m => m === NotationMode.LETTERS ? NotationMode.DEGREES : NotationMode.LETTERS)}
-                className="flex items-center gap-2 px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm font-medium text-slate-300 hover:text-white transition-colors"
-            >
-                {notationMode === NotationMode.LETTERS ? <Hash size={18} /> : <Type size={18} />}
-                <span className="hidden sm:inline">{notationMode === NotationMode.LETTERS ? 'Letters' : 'Degrees'}</span>
-            </button>
-
-          <button 
-            onClick={startPerformance}
-            disabled={setlistItems.length === 0}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Play size={18} />
-            Perform
-          </button>
-
-          <button 
-            onClick={() => setShowPdfModal(true)}
-            disabled={setlistItems.length === 0}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-lg font-medium transition-colors disabled:opacity-50"
-          >
-            <FileDown size={18} />
-            Export PDF
-          </button>
-        </div>
+        <button onClick={onBack} className="text-slate-400 hover:text-white flex items-center gap-2"><ChevronLeft size={20} /> Back</button>
       </div>
 
-      <div className="flex-1 flex gap-8 overflow-hidden">
-        <div className="w-7/12 flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-           <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
-             <div>
-               <h3 className="font-bold text-white">Setlist Order</h3>
-               <p className="text-xs text-slate-500">{setlistItems.length} songs</p>
-             </div>
-             {!isVirtual && <div className="text-xs text-slate-500 italic">Drag to reorder</div>}
-             {isVirtual && <div className="text-xs text-pink-500 font-bold uppercase tracking-wider">Viewing favorites</div>}
-           </div>
-           
-           <div className="flex-1 overflow-y-auto p-2 space-y-2">
-             {setlistItems.length === 0 && (
-               <div className="text-center text-slate-500 py-10 text-sm italic">
-                 {isVirtual ? "You haven't favorited any songs yet." : "This setlist is empty. Add songs from the library."}
-               </div>
-             )}
-             {setlistItems.map((item, index) => (
-               <div 
-                 key={item.id}
-                 draggable={!isVirtual}
-                 onDragStart={(e) => handleDragStart(e, index)}
-                 onDragEnter={(e) => handleDragEnter(e, index)}
-                 onDragEnd={handleDragEnd}
-                 onDragOver={(e) => e.preventDefault()}
-                 className={`flex items-center gap-3 bg-slate-950 border border-slate-800 p-3 rounded-lg group hover:border-slate-700 ${!isVirtual ? 'cursor-move' : 'cursor-default'}`}
-               >
-                 <div className="flex flex-col items-center justify-center w-6 text-slate-600">
-                    <span className="text-xs font-bold mb-1">{index + 1}</span>
-                    {!isVirtual && <GripVertical className="cursor-grab hover:text-slate-400" size={16} />}
-                 </div>
-                 
-                 <div className="flex-1 min-w-0">
-                   <div className="font-medium text-white truncate">{item.song.title}</div>
-                   <div className="text-xs text-slate-500 truncate">{item.song.artist} • Original: {item.song.key}</div>
-                 </div>
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6 mb-8">
+        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Create New Setlist</h3>
+        <form onSubmit={handleCreateSetlist} className="flex flex-col sm:flex-row gap-3">
+          <input type="text" placeholder="Gig at The Pub..." value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 sm:py-2 text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-500" />
+          {groups.length > 0 && (
+            <div className="flex-1 sm:flex-none sm:w-48">
+              <select value={selectedGroupId} onChange={(e) => setSelectedGroupId(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 sm:py-2 text-white focus:outline-none focus:border-cyan-500 appearance-none">
+                <option value="">Personal</option>
+                {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
+            </div>
+          )}
+          <button type="submit" className="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-3 sm:py-2 rounded-lg flex items-center justify-center gap-2 font-bold shadow-lg shadow-cyan-900/20 active:scale-95 transition-all">
+            <Plus size={20} /> Create
+          </button>
+        </form>
+      </div>
 
-                 <div className="flex items-center bg-slate-900 rounded border border-slate-800 mr-2">
-                    <button 
+      <div className="space-y-8">
+        <div>
+          <h3 className="text-white font-bold mb-4 flex items-center gap-2">
+            <User size={18} className="text-cyan-400" /> Personal
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* VIRTUAL FAVORITES CARD */}
+            <div
+              onClick={() => handleSelectSetlist(favoriteSetlist)}
+              className="bg-gradient-to-br from-pink-900/40 to-slate-900 border border-pink-500/30 rounded-xl p-6 cursor-pointer hover:border-pink-500 transition-all group relative overflow-hidden"
+            >
+              <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform duration-500">
+                <Heart size={100} fill="currentColor" className="text-pink-500" />
+              </div>
+              <div className="flex justify-between items-start relative z-10">
+                <div>
+                  <h3 className="text-xl font-bold text-white mb-1 group-hover:text-pink-400 transition-colors flex items-center gap-2">
+                    <Heart size={20} fill="currentColor" className="text-pink-500 animate-pulse" /> My Favorites
+                  </h3>
+                  <div className="text-xs text-slate-500 flex items-center gap-2">
+                    Dynamic List • {allSongs.filter(s => s.is_favorite).length} songs
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {personalSetlists.map(list => (
+              <SetlistCard key={list.id} list={list} onDelete={confirmDeleteSetlist} onSelect={handleSelectSetlist} />
+            ))}
+          </div>
+        </div>
+
+        {groupSetlists.map(g => (
+          <div key={g.group.id}>
+            <h3 className="text-white font-bold mb-4 flex items-center gap-2"><Users size={18} className="text-cyan-400" /> {g.group.name}</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {g.lists.map(list => <SetlistCard key={list.id} list={list} onDelete={confirmDeleteSetlist} onSelect={handleSelectSetlist} />)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const isVirtual = currentSetlist?.id === FAVORITES_ID;
+
+  return (
+    <div className="max-w-6xl mx-auto min-h-[calc(100vh-140px)] flex flex-col relative px-4 sm:px-0">
+      {editingTextId !== null && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-md w-full shadow-2xl">
+            <h3 className="text-xl font-bold text-white mb-4">
+              {editingTextId === 'new' ? 'Add Text Note' : 'Edit Text Note'}
+            </h3>
+            
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Text Content</label>
+                <textarea
+                  value={editingTextValue}
+                  onChange={(e) => setEditingTextValue(e.target.value)}
+                  placeholder="Enter your note..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500 h-24 resize-none"
+                />
+              </div>
+              
+              <div className="flex gap-4">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Size</label>
+                  <select 
+                    value={editingTextSize} 
+                    onChange={(e) => setEditingTextSize(e.target.value as any)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500"
+                  >
+                    {Object.entries(TEXT_SIZES).map(([key, size]) => (
+                      <option key={key} value={key}>{size.description}</option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Color</label>
+                  <select 
+                    value={editingTextColor} 
+                    onChange={(e) => setEditingTextColor(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500"
+                  >
+                    {Object.entries(TEXT_COLORS).map(([key, color]) => (
+                      <option key={key} value={key}>{color.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setEditingTextId(null)} className="px-4 py-2 text-slate-400 hover:text-white">Cancel</button>
+              <button 
+                onClick={saveTextNote} 
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPdfModal && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+        <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl w-96 shadow-2xl">
+          <h3 className="text-xl font-bold text-white mb-4">Export PDF</h3>
+          <div className="mb-3">
+            <label className="block text-xs font-medium text-slate-400 mb-1">Document title</label>
+            <input type="text" value={pdfTitle} onChange={(e) => setPdfTitle(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500" />
+          </div>
+          <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+            Songs and text notes flow <span className="text-slate-300">continuously</span>. A song that doesn't fit on the current page will automatically start on a new one.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowPdfModal(false)} className="px-4 py-2 text-slate-400 hover:text-white">Cancel</button>
+            <button onClick={exportToPDF} className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg flex items-center gap-2">
+              <FileDown size={16} /> Export
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    <div className="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 flex-shrink-0">
+      <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto">
+        <button onClick={() => setCurrentSetlist(null)} className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-white shrink-0">
+          <ChevronLeft size={20} />
+        </button>
+        <div className="flex items-center gap-2 min-w-0">
+          {isEditingTitle && !isVirtual ? (
+            <form
+              onSubmit={(e) => { e.preventDefault(); handleUpdateSetlistTitle(); }}
+              className="flex items-center gap-2"
+            >
+              <input
+                autoFocus
+                type="text"
+                value={editTitleValue}
+                onChange={(e) => setEditTitleValue(e.target.value)}
+                onBlur={handleUpdateSetlistTitle}
+                className="bg-slate-950 border border-cyan-500 rounded px-2 py-1 text-xl font-bold text-white focus:outline-none" />
+            </form>
+          ) : (
+            <div className="flex items-center gap-3 group min-w-0">
+              <h1 className="text-xl sm:text-2xl font-bold text-white cursor-pointer flex items-center gap-3 truncate" onClick={() => !isVirtual && setIsEditingTitle(true)}>
+                {isVirtual && <Heart size={24} className="text-pink-500 shrink-0" fill="currentColor" />}
+                <span className="truncate">{currentSetlist.title}</span>
+              </h1>
+              {!isVirtual && (
+                <button onClick={() => setIsEditingTitle(true)} className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-cyan-400 transition-opacity">
+                  <Edit2 size={16} />
+                </button>
+              )}
+            </div>
+          )}
+
+          {currentSetlist.group_id && (
+            <span className="px-2 py-0.5 rounded-full bg-purple-900/30 text-purple-400 text-xs border border-purple-800/50 flex items-center gap-1">
+              <Users size={12} />
+              Group Setlist
+            </span>
+          )}
+
+          {isVirtual && (
+            <span className="px-2 py-0.5 rounded-full bg-pink-900/30 text-pink-400 text-xs border border-pink-800/50 flex items-center gap-1">
+              Smart List
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2 sm:gap-3 w-full sm:w-auto">
+        <button
+          onClick={() => setNotationMode(m => m === NotationMode.LETTERS ? NotationMode.DEGREES : NotationMode.LETTERS)}
+          className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm font-medium text-slate-300 hover:text-white transition-colors"
+        >
+          {notationMode === NotationMode.LETTERS ? <Hash size={18} /> : <Type size={18} />}
+          <span>{notationMode === NotationMode.LETTERS ? 'Letters' : 'Degrees'}</span>
+        </button>
+
+        <button
+          onClick={startPerformance}
+          disabled={setlistItems.length === 0}
+          className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base"
+        >
+          <Play size={18} />
+          Perform
+        </button>
+        <button onClick={() => setShowPdfModal(true)} disabled={setlistItems.length === 0}
+          className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-lg font-medium transition-colors disabled:opacity-50 text-sm sm:text-base">
+          <FileDown size={18} /> <span className="hidden sm:inline">Export PDF</span><span className="sm:hidden">PDF</span>
+        </button>
+      </div>
+    </div>
+
+    <div className="flex-1 flex flex-col lg:flex-row gap-6 lg:gap-8 overflow-visible lg:overflow-hidden pb-10">
+      <div className="w-full lg:w-7/12 flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden min-h-[400px]">
+        <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
+          <div>
+            <h3 className="font-bold text-white">Setlist Order</h3>
+            <p className="text-xs text-slate-500">{setlistItems.length} items</p>
+          </div>
+          {!isVirtual && (
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={jumpToLibrary}
+                className="lg:hidden text-xs flex items-center gap-1 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-400 py-1.5 px-3 rounded-md transition-colors border border-cyan-800/50"
+              >
+                <Plus size={14} /> Add Song
+              </button>
+              <button 
+                onClick={handleAddTextNote}
+                className="text-xs flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-1.5 px-3 rounded-md transition-colors border border-slate-700 hover:border-slate-500"
+              >
+                <Type size={14} /> <span className="hidden xs:inline">Add Note</span><span className="xs:hidden">Note</span>
+              </button>
+            </div>
+          )}
+          {isVirtual && <div className="text-xs text-pink-500 font-bold uppercase tracking-wider">Viewing favorites</div>}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-2 space-y-2">
+          {setlistItems.length === 0 && (
+            <div className="text-center text-slate-500 py-10 text-sm italic">
+              {isVirtual ? "You haven't favorited any songs yet." : "This setlist is empty. Add songs from the library."}
+            </div>
+          )}
+          {setlistItems.map((item, index) => (
+            <div
+              key={item.id}
+              draggable={!isVirtual}
+              onDragStart={(e) => handleDragStart(e, index)}
+              onDragEnter={(e) => handleDragEnter(e, index)}
+              onDragEnd={handleDragEnd}
+              onDragOver={(e) => e.preventDefault()}
+              className={`flex items-center gap-3 bg-slate-950 border border-slate-800 p-3 rounded-lg group hover:border-slate-700 ${!isVirtual ? 'cursor-move' : 'cursor-default'}`}
+            >
+              <div className="flex flex-col items-center justify-center w-10 text-slate-600 gap-0.5 border-r border-slate-800/50 mr-1">
+                {!isVirtual && (
+                  <button 
+                    onClick={() => moveItem(index, index - 1)}
+                    disabled={index === 0}
+                    className="p-2 hover:text-cyan-400 disabled:opacity-0 transition-all focus:outline-none active:scale-125"
+                    title="Move Up"
+                  >
+                    <ChevronUp size={20} />
+                  </button>
+                )}
+                <span className="text-[10px] font-bold leading-none select-none text-slate-500">{index + 1}</span>
+                {!isVirtual && (
+                  <button 
+                    onClick={() => moveItem(index, index + 1)}
+                    disabled={index === setlistItems.length - 1}
+                    className="p-2 hover:text-cyan-400 disabled:opacity-0 transition-all focus:outline-none active:scale-125"
+                    title="Move Down"
+                  >
+                    <ChevronDown size={20} />
+                  </button>
+                )}
+                {!isVirtual && <GripVertical className="cursor-grab hover:text-slate-400 mt-1 shrink-0 md:block hidden" style={{ touchAction: 'none' }} size={14} />}
+              </div>
+
+              {item.type === 'song' ? (
+                <>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-white break-words sm:truncate">{item.song.title}</div>
+                    <div className="text-xs text-slate-500 break-words sm:truncate">{item.song.artist} • Original: {item.song.key}</div>
+                  </div>
+
+                  <div className="flex items-center bg-slate-900 rounded border border-slate-800 mr-2">
+                    <button
                       onClick={() => updateItemTranspose(item.id, item.transpose - 1)}
                       className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white"
                     >
                       <Minus size={14} />
                     </button>
                     <div className={`w-8 text-center text-xs font-mono font-bold ${item.transpose !== 0 ? 'text-cyan-400' : 'text-slate-500'}`}>
-                       {item.transpose > 0 ? '+' : ''}{item.transpose}
+                      {item.transpose > 0 ? '+' : ''}{item.transpose}
                     </div>
-                    <button 
+                    <button
                       onClick={() => updateItemTranspose(item.id, item.transpose + 1)}
                       className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white"
                     >
                       <Plus size={14} />
                     </button>
-                 </div>
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1 min-w-0 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Type size={14} className="text-slate-500" />
+                    <div className={`font-medium truncate ${TEXT_SIZES[item.size]?.uiClass}`} style={{ color: TEXT_COLORS[item.color]?.hex }}>
+                      {item.content || 'Text Note'}
+                    </div>
+                  </div>
+                  {!isVirtual && (
+                    <button 
+                      onClick={() => handleEditNote(item)}
+                      className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-md mr-2"
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                  )}
+                </div>
+              )}
 
-                 {!isVirtual && (
-                   <button 
-                     onClick={() => removeSongFromSetlist(item.id)}
-                     className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-2"
-                   >
-                     <Trash2 size={16} />
-                   </button>
-                 )}
-               </div>
-             ))}
-           </div>
+              {!isVirtual && (
+                  <button
+                    onClick={() => removeItemFromSetlist(item.id)}
+                    className="text-slate-600 hover:text-red-400 md:opacity-0 group-hover:opacity-100 transition-opacity p-2 ml-auto"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+              )}
+            </div>
+          ))}
         </div>
-
-        {!isVirtual && (
-          <div className="w-5/12 flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-             <div className="p-4 border-b border-slate-800">
-               <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
-                  <input 
-                    type="text"
-                    placeholder="Search library..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 pl-10 pr-4 text-sm text-slate-300 focus:outline-none focus:border-cyan-500"
-                  />
-               </div>
-             </div>
-             
-             <div className="flex-1 overflow-y-auto p-2 space-y-2">
-               {allSongs
-                 .filter(s => 
-                   !setlistItems.find(item => item.song.id === s.id) && 
-                   (s.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                    s.artist.toLowerCase().includes(searchQuery.toLowerCase()))
-                 )
-                 .slice(0, 30)
-                 .map(song => (
-                   <div key={song.id} className="flex items-center justify-between p-3 hover:bg-slate-800 rounded-lg transition-colors group">
-                      <div className="min-w-0">
-                         <div className="font-medium text-slate-200 truncate group-hover:text-white">{song.title}</div>
-                         <div className="text-xs text-slate-500">{song.artist}</div>
-                      </div>
-                      <button 
-                        onClick={() => addSongToSetlist(song)}
-                        className="p-1.5 bg-slate-800 hover:bg-cyan-600 hover:text-white text-cyan-500 rounded-md transition-colors border border-slate-700 hover:border-cyan-500"
-                      >
-                        <Plus size={16} />
-                      </button>
-                   </div>
-                 ))
-               }
-             </div>
-          </div>
-        )}
-
-        {isVirtual && (
-          <div className="w-5/12 flex flex-col items-center justify-center bg-slate-900/50 border border-dashed border-slate-800 rounded-xl p-10 text-center">
-            <Heart size={48} className="text-pink-500/20 mb-4" />
-            <h4 className="text-white font-bold mb-2">Dynamic List</h4>
-            <p className="text-slate-500 text-sm leading-relaxed">
-              This list automatically updates whenever you favorite or unfavorite a song in the library. 
-              Changes to transposition here are local to this session.
-            </p>
-          </div>
-        )}
       </div>
-    </div>
-  );
-};
 
-interface SetlistCardProps {
-  list: Setlist;
-  onDelete: (id: string, e: React.MouseEvent) => void;
-  onSelect: (l: Setlist) => void;
-}
+      {!isVirtual && (
+      <div ref={libraryRef} className="w-full lg:w-5/12 flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden min-h-[400px]">
+          <div className="p-4 border-b border-slate-800 bg-slate-900/50">
+            <h3 className="font-bold text-white mb-3">Song Library</h3>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+              <input
+                type="text"
+                placeholder="Search library..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 pl-10 pr-4 text-sm text-slate-300 focus:outline-none focus:border-cyan-500"
+              />
+            </div>
+          </div>
 
-const SetlistCard: React.FC<SetlistCardProps> = ({ list, onDelete, onSelect }) => (
-  <div 
-    onClick={() => onSelect(list)}
-    className="bg-slate-900 border border-slate-800 rounded-xl p-6 cursor-pointer hover:border-cyan-500/50 transition-all group relative"
-  >
-    <div className="flex justify-between items-start">
-      <div>
-         <h3 className="text-xl font-bold text-white mb-1 group-hover:text-cyan-400 transition-colors">{list.title}</h3>
-         <div className="text-xs text-slate-500 flex items-center gap-2">
-           <Calendar size={12} />
-           {new Date(list.created_at).toLocaleDateString()}
-         </div>
-      </div>
-      <button 
-        onClick={(e) => onDelete(list.id, e)}
-        className="text-slate-600 hover:text-red-400 p-2"
-      >
-        <Trash2 size={18} />
-      </button>
+          <div className="flex-1 overflow-y-auto p-2 space-y-2">
+            {allSongs
+              .filter(s =>
+                !setlistItems.find(item => item.type === 'song' && item.song.id === s.id) &&
+                (s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  s.artist.toLowerCase().includes(searchQuery.toLowerCase()))
+              )
+              .slice(0, 30)
+              .map(song => (
+                <div key={song.id} className="flex items-center justify-between p-3 hover:bg-slate-800 rounded-lg transition-colors group">
+                  <div className="min-w-0">
+                    <div className="font-medium text-slate-200 truncate group-hover:text-white">{song.title}</div>
+                    <div className="text-xs text-slate-500">{song.artist}</div>
+                  </div>
+                  <button
+                    onClick={() => addSongToSetlist(song)}
+                    className="p-2 sm:p-1.5 bg-slate-800 hover:bg-cyan-600 hover:text-white text-cyan-500 rounded-md transition-colors border border-slate-700 hover:border-cyan-500"
+                  >
+                    <Plus size={18} />
+                  </button>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      )}
+
+      {isVirtual && (
+        <div className="w-full lg:w-5/12 flex flex-col items-center justify-center bg-slate-900/50 border border-dashed border-slate-800 rounded-xl p-10 text-center">
+          <Heart size={48} className="text-pink-500/20 mb-4" />
+          <h4 className="text-white font-bold mb-2">Dynamic List</h4>
+          <p className="text-slate-500 text-sm leading-relaxed">
+            This list automatically updates whenever you favorite or unfavorite a song in the library.
+            Changes to transposition here are local to this session.
+          </p>
+        </div>
+      )}
     </div>
   </div>
 );
+};
 
 export default SetlistEditor;

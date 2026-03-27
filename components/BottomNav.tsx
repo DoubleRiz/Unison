@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { LayoutGrid, Library, ListMusic, Music2, User, HelpCircle } from 'lucide-react';
+import { LayoutGrid, Library, ListMusic, Music2, User } from 'lucide-react';
 
 interface BottomNavProps {
   currentView: string;
