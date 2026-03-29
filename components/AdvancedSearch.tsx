@@ -6,12 +6,13 @@ import { Search, Filter, Dices, Music, User, Tag, Loader2, ArrowUpAZ } from 'luc
 
 interface AdvancedSearchProps {
   session?: any;
+  isAdmin?: boolean;
   initialQuery?: string;
   onSelectSong: (id: string) => void;
   onAddSong?: () => void;
 }
 
-const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ session, initialQuery = '', onSelectSong, onAddSong }) => {
+const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ session, isAdmin = false, initialQuery = '', onSelectSong, onAddSong }) => {
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -20,6 +21,8 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ session, initialQuery =
   const [selectedGenre, setSelectedGenre] = useState('');
   const [selectedTag, setSelectedTag] = useState('');
   const [selectedArtist, setSelectedArtist] = useState('');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
 
   // Sync initialQuery if it changes while component is mounted
   useEffect(() => {
@@ -37,15 +40,17 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ session, initialQuery =
         .from('songs')
         .select('*');
 
-      if (session?.user?.id) {
+      if (isAdmin) {
+        // Admin sees all songs — RLS handles it
+      } else if (session?.user?.id) {
         query = query.or(`is_public.eq.true,user_id.eq.${session.user.id}`);
       } else {
         query = query.eq('is_public', true);
       }
         
       const { data, error } = await query
-        .order('title', { ascending: true })
-        .limit(1000);
+        .select('id, user_id, title, artist, bpm, original_key, youtube_url, audio_url, is_public, genres, tags')
+        .order('title', { ascending: true });
 
       if (error) throw error;
 
@@ -105,7 +110,11 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ session, initialQuery =
     setSelectedArtist('');
     setSelectedGenre('');
     setSelectedTag('');
+    setPage(1);
   };
+
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [searchTitle, selectedArtist, selectedGenre, selectedTag]);
 
   return (
     <div className="max-w-6xl mx-auto pb-20 p-6 animate-in fade-in duration-500">
@@ -231,6 +240,11 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ session, initialQuery =
              <ArrowUpAZ size={20} className="text-slate-500" />
              Results <span className="text-slate-500 font-normal">({filteredSongs.length})</span>
            </h2>
+           {filteredSongs.length > PAGE_SIZE && (
+             <span className="text-xs text-slate-500">
+               Page {page} / {Math.ceil(filteredSongs.length / PAGE_SIZE)}
+             </span>
+           )}
         </div>
 
         {loading ? (
@@ -238,42 +252,83 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ session, initialQuery =
             <Loader2 size={40} className="text-cyan-500 animate-spin" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredSongs.map(song => (
-              <div 
-                key={song.id}
-                onClick={() => onSelectSong(song.id)}
-                className="bg-slate-900 border border-slate-800 rounded-lg p-4 hover:border-cyan-500/50 hover:bg-slate-800 transition-all cursor-pointer group"
-              >
-                <div className="flex justify-between items-start mb-2">
-                   <h3 className="font-bold text-white group-hover:text-cyan-400 truncate pr-2">{song.title}</h3>
-                   <span className="text-xs font-mono text-slate-500 border border-slate-800 px-1.5 py-0.5 rounded">{song.key}</span>
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredSongs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map(song => (
+                <div
+                  key={song.id}
+                  onClick={() => onSelectSong(song.id)}
+                  className="bg-slate-900 border border-slate-800 rounded-lg p-4 hover:border-cyan-500/50 hover:bg-slate-800 transition-all cursor-pointer group"
+                >
+                  <div className="flex justify-between items-start mb-2">
+                     <h3 className="font-bold text-white group-hover:text-cyan-400 truncate pr-2">{song.title}</h3>
+                     <span className="text-xs font-mono text-slate-500 border border-slate-800 px-1.5 py-0.5 rounded">{song.key}</span>
+                  </div>
+                  <div className="text-sm text-slate-400 mb-3">{song.artist}</div>
+
+                  <div className="flex flex-wrap gap-1.5">
+                     {song.genres?.slice(0, 2).map(g => (
+                       <span key={g} className="text-[10px] px-1.5 py-0.5 bg-slate-950 text-slate-500 rounded border border-slate-800">
+                         {g}
+                       </span>
+                     ))}
+                     {song.tags?.slice(0, 2).map(t => (
+                       <span key={t} className="text-[10px] px-1.5 py-0.5 bg-purple-900/10 text-purple-400/70 rounded border border-purple-900/20">
+                         #{t}
+                       </span>
+                     ))}
+                  </div>
                 </div>
-                <div className="text-sm text-slate-400 mb-3">{song.artist}</div>
-                
-                <div className="flex flex-wrap gap-1.5">
-                   {song.genres?.slice(0, 2).map(g => (
-                     <span key={g} className="text-[10px] px-1.5 py-0.5 bg-slate-950 text-slate-500 rounded border border-slate-800">
-                       {g}
-                     </span>
-                   ))}
-                   {song.tags?.slice(0, 2).map(t => (
-                     <span key={t} className="text-[10px] px-1.5 py-0.5 bg-purple-900/10 text-purple-400/70 rounded border border-purple-900/20">
-                       #{t}
-                     </span>
-                   ))}
+              ))}
+
+              {filteredSongs.length === 0 && (
+                <div className="col-span-full text-center py-10 bg-slate-900/50 rounded-xl border border-dashed border-slate-800">
+                  <Music size={48} className="mx-auto text-slate-600 mb-3" />
+                  <p className="text-slate-400">No songs match your specific filters.</p>
+                  <button onClick={clearFilters} className="mt-2 text-cyan-400 hover:underline">Clear all filters</button>
                 </div>
-              </div>
-            ))}
-            
-            {filteredSongs.length === 0 && (
-              <div className="col-span-full text-center py-10 bg-slate-900/50 rounded-xl border border-dashed border-slate-800">
-                <Music size={48} className="mx-auto text-slate-600 mb-3" />
-                <p className="text-slate-400">No songs match your specific filters.</p>
-                <button onClick={clearFilters} className="mt-2 text-cyan-400 hover:underline">Clear all filters</button>
+              )}
+            </div>
+
+            {filteredSongs.length > PAGE_SIZE && (
+              <div className="flex justify-center items-center gap-2 mt-8">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  Previous
+                </button>
+                {Array.from({ length: Math.ceil(filteredSongs.length / PAGE_SIZE) }, (_, i) => i + 1)
+                  .filter(p => p === 1 || p === Math.ceil(filteredSongs.length / PAGE_SIZE) || Math.abs(p - page) <= 2)
+                  .reduce<(number | '...')[]>((acc, p, i, arr) => {
+                    if (i > 0 && p - (arr[i - 1] as number) > 1) acc.push('...');
+                    acc.push(p);
+                    return acc;
+                  }, [])
+                  .map((p, i) =>
+                    p === '...' ? (
+                      <span key={`ellipsis-${i}`} className="text-slate-500 px-1">…</span>
+                    ) : (
+                      <button
+                        key={p}
+                        onClick={() => setPage(p as number)}
+                        className={`w-9 h-9 rounded-lg text-sm font-medium transition-colors ${page === p ? 'bg-cyan-600 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'}`}
+                      >
+                        {p}
+                      </button>
+                    )
+                  )}
+                <button
+                  onClick={() => setPage(p => Math.min(Math.ceil(filteredSongs.length / PAGE_SIZE), p + 1))}
+                  disabled={page === Math.ceil(filteredSongs.length / PAGE_SIZE)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next
+                </button>
               </div>
             )}
-          </div>
+          </>
         )}
       </div>
     </div>

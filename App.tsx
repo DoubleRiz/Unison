@@ -17,6 +17,8 @@ import HelpPage from './components/HelpPage';
 import ChordDictionary from './components/tools/ChordDictionary';
 import ChordProgressions from './components/tools/ChordProgressions';
 import BottomNav from './components/BottomNav';
+import EmailConfirmPage from './components/EmailConfirmPage';
+import ResetPasswordPage from './components/ResetPasswordPage';
 import { 
   Minus, 
   Plus, 
@@ -48,7 +50,7 @@ const App: React.FC = () => {
   
   // Navigation & UI State
   const [currentSongId, setCurrentSongId] = useState<string | null>(null);
-  const [currentView, setCurrentView] = useState<'landing' | 'main' | 'editor' | 'profile' | 'setlists' | 'groups' | 'search' | 'help' | 'chord-dictionary' | 'progressions'>('landing'); 
+  const [currentView, setCurrentView] = useState<'landing' | 'main' | 'editor' | 'profile' | 'setlists' | 'groups' | 'search' | 'help' | 'chord-dictionary' | 'progressions' | 'email-confirmed' | 'reset-password'>('landing');
   const [initialSearchQuery, setInitialSearchQuery] = useState('');
   const [transpose, setTranspose] = useState(0);
   const [notationMode, setNotationMode] = useState<NotationMode>(NotationMode.LETTERS);
@@ -122,13 +124,28 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    // Check if this is a Supabase auth redirect
+    const hash = window.location.hash;
+    const isEmailConfirmation = hash.includes('type=signup') || hash.includes('type=email_change');
+    const isPasswordRecovery = hash.includes('type=recovery');
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
+      if (session && isEmailConfirmation) {
+        setCurrentView('email-confirmed');
+        window.history.replaceState(null, '', window.location.pathname);
+      } else if (session && isPasswordRecovery) {
+        setCurrentView('reset-password');
+        window.history.replaceState(null, '', window.location.pathname);
+      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) {
+      if (_event === 'PASSWORD_RECOVERY') {
+        setCurrentView('reset-password');
+        window.history.replaceState(null, '', window.location.pathname);
+      } else if (session) {
         setShowAuthModal(false);
       }
     });
@@ -165,7 +182,7 @@ const App: React.FC = () => {
     setTranspose(0);
   };
 
-  const handleSaveSong = async (songData: Song) => {
+  const handleSaveSong = async (songData: Song, onSuccess?: () => void) => {
     if (!session) return;
     try {
       const isNew = !songs.find(s => s.id === songData.id);
@@ -196,7 +213,7 @@ const App: React.FC = () => {
         if (error) throw error;
         setSongs(songs.map(s => s.id === songData.id ? { ...songData, user_id: s.user_id || session.user.id, is_favorite: s.is_favorite } : s));
       }
-      setCurrentView('main');
+      if (onSuccess) onSuccess(); else setCurrentView('main');
     } catch (error: any) {
       console.error('Error saving song:', error.message);
     }
@@ -297,6 +314,7 @@ const App: React.FC = () => {
       return (
         <AdvancedSearch
           session={session}
+          isAdmin={isAdmin}
           initialQuery={initialSearchQuery}
           onSelectSong={(id) => {
             setCurrentSongId(id);
@@ -315,11 +333,12 @@ const App: React.FC = () => {
 
     if (currentView === 'setlists') {
       return session ? (
-        <SetlistEditor 
-          user={session.user} 
-          allSongs={songs} 
+        <SetlistEditor
+          user={session.user}
+          allSongs={songs}
           groups={groups}
-          onBack={() => setCurrentView('landing')} 
+          onBack={() => setCurrentView('landing')}
+          onSaveSong={handleSaveSong}
         />
       ) : <AuthRequiredState title="Gig Planner" desc="Join the community to create professional setlists, organize your performances and collaborate with your band." />;
     }
@@ -371,6 +390,14 @@ const App: React.FC = () => {
       </div>
     );
   };
+
+  if (currentView === 'email-confirmed') {
+    return <EmailConfirmPage onContinue={() => setCurrentView('landing')} />;
+  }
+
+  if (currentView === 'reset-password') {
+    return <ResetPasswordPage onDone={() => setCurrentView('landing')} />;
+  }
 
   if (loading) {
     return (
