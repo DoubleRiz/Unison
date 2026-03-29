@@ -1,5 +1,5 @@
 
-const CACHE_NAME = 'unison-v2';
+const CACHE_NAME = 'unison-v3';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',

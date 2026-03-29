@@ -17,6 +17,7 @@ import HelpPage from './components/HelpPage';
 import ChordDictionary from './components/tools/ChordDictionary';
 import ChordProgressions from './components/tools/ChordProgressions';
 import BottomNav from './components/BottomNav';
+import ChangelogPage from './components/ChangelogPage';
 import EmailConfirmPage from './components/EmailConfirmPage';
 import ResetPasswordPage from './components/ResetPasswordPage';
 import { 
@@ -50,7 +51,7 @@ const App: React.FC = () => {
   
   // Navigation & UI State
   const [currentSongId, setCurrentSongId] = useState<string | null>(null);
-  const [currentView, setCurrentView] = useState<'landing' | 'main' | 'editor' | 'profile' | 'setlists' | 'groups' | 'search' | 'help' | 'chord-dictionary' | 'progressions' | 'email-confirmed' | 'reset-password'>('landing');
+  const [currentView, setCurrentView] = useState<'landing' | 'main' | 'editor' | 'profile' | 'setlists' | 'groups' | 'search' | 'help' | 'chord-dictionary' | 'progressions' | 'email-confirmed' | 'reset-password' | 'changelog'>('landing');
   const [initialSearchQuery, setInitialSearchQuery] = useState('');
   const [transpose, setTranspose] = useState(0);
   const [notationMode, setNotationMode] = useState<NotationMode>(NotationMode.LETTERS);
@@ -302,6 +303,10 @@ const App: React.FC = () => {
       return <HelpPage onBack={() => setCurrentView(session ? 'main' : 'landing')} />;
     }
 
+    if (currentView === 'changelog') {
+      return <ChangelogPage onBack={() => setCurrentView(session ? 'main' : 'landing')} />;
+    }
+
     if (currentView === 'chord-dictionary') {
       return <ChordDictionary />;
     }
@@ -530,6 +535,24 @@ const App: React.FC = () => {
           <div className={currentView !== 'landing' ? 'max-w-[1600px] mx-auto py-6 md:py-10' : ''}>
             {renderMainContent()}
           </div>
+          {currentView !== 'changelog' && (
+            <footer className="px-4 sm:px-8 md:px-10 lg:px-16 py-4 border-t border-slate-100 dark:border-slate-800/60 flex items-center justify-end gap-4">
+              <button
+                onClick={() => setCurrentView('changelog')}
+                className="text-xs text-slate-400 dark:text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors font-medium"
+              >
+                Nouveautés v1.0.0
+              </button>
+              <a
+                href="https://east-motorcycle-1da.notion.site/Unison-le-guide-3321b961f5818087b54be8e98023bf67?source=copy_link"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-slate-400 dark:text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors font-medium"
+              >
+                Documentation
+              </a>
+            </footer>
+          )}
         </div>
 
         {isMobile && (

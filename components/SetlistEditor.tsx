@@ -800,7 +800,7 @@ const isVirtual = currentSetlist?.id === FAVORITES_ID;
   return (
     <div className="max-w-6xl mx-auto min-h-[calc(100vh-140px)] flex flex-col relative px-4 sm:px-0">
       {editingTextId !== null && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-md w-full shadow-2xl">
             <h3 className="text-xl font-bold text-white mb-4">
               {editingTextId === 'new' ? 'Add Text Note' : 'Edit Text Note'}

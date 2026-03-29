@@ -34,6 +34,7 @@ const SongSheet: React.FC<SongSheetProps> = ({
 }) => {
   const [isFavorite, setIsFavorite] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showVideo, setShowVideo] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   
   // View Settings
@@ -178,6 +179,18 @@ const SongSheet: React.FC<SongSheetProps> = ({
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
   }, [isScrolling]);
+
+  const getYoutubeEmbedUrl = (url: string): string | null => {
+    if (!url) return null;
+    const patterns = [
+      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+    ];
+    for (const pattern of patterns) {
+      const match = url.match(pattern);
+      if (match) return `https://www.youtube.com/embed/${match[1]}`;
+    }
+    return null;
+  };
 
   const toggleFavorite = async () => {
     if (!session || !onToggleFavorite) return;
@@ -437,6 +450,30 @@ const SongSheet: React.FC<SongSheetProps> = ({
           <button onClick={handleExportPDF} className="flex items-center gap-2 px-4 py-2 bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg text-xs font-bold hover:bg-slate-300 transition-colors"><FileDown size={14} /> EXPORT PDF</button>
         </div>
       </div>
+
+      {/* YouTube Embed */}
+      {song.youtubeUrl && getYoutubeEmbedUrl(song.youtubeUrl) && (
+        <div className="mb-8">
+          <button
+            onClick={() => setShowVideo(v => !v)}
+            className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors mb-2"
+          >
+            {showVideo ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            {showVideo ? 'Masquer la vidéo' : 'Afficher la vidéo'}
+          </button>
+          {showVideo && (
+            <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+              <iframe
+                className="absolute inset-0 w-full h-full rounded-xl border border-slate-200 dark:border-slate-800"
+                src={getYoutubeEmbedUrl(song.youtubeUrl)!}
+                title={`${song.title} - ${song.artist}`}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Sheet Music Area */}
       <div className={`font-mono select-text transition-all ${isPinching ? 'duration-0' : 'duration-200'}`} style={{ fontSize: `${fontSize}rem` }}>
