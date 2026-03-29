@@ -5,7 +5,11 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:api.github.com)",
       "WebSearch",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(curl -s -o /Users/gautier/Documents/projets/unison/public/icons/icon-192.png \"https://img.icons8.com/fluency/192/music-identifier.png\")",
+      "Bash(curl -s -o /Users/gautier/Documents/projets/unison/public/icons/icon-512.png \"https://img.icons8.com/fluency/512/music-identifier.png\")",
+      "Bash(xxd /Users/gautier/Documents/projets/unison/public/icons/icon-192.png)",
+      "Bash(convert --version)"
     ]
   }
 }
