@@ -17,7 +17,7 @@ const SongEditor: React.FC<SongEditorProps> = ({ initialSong, groups, existingTa
   const [title, setTitle] = useState('');
   const [artist, setArtist] = useState('');
   const [bpm, setBpm] = useState<string>('');
-  
+
   // Split Key into Root + Quality
   const [keyRoot, setKeyRoot] = useState('C');
   const [keyQuality, setKeyQuality] = useState('Major'); // 'Major' or 'Minor'
@@ -26,9 +26,9 @@ const SongEditor: React.FC<SongEditorProps> = ({ initialSong, groups, existingTa
   const [notes, setNotes] = useState('');
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [audioUrl, setAudioUrl] = useState('');
-  const [isPublic, setIsPublic] = useState(false);
+  const [isPublic, setIsPublic] = useState(true);
   const [sharedGroupId, setSharedGroupId] = useState<string>('');
-  
+
   // Genres & Tags
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [tags, setTags] = useState<string[]>([]);
@@ -39,11 +39,11 @@ const SongEditor: React.FC<SongEditorProps> = ({ initialSong, groups, existingTa
       setTitle(initialSong.title);
       setArtist(initialSong.artist);
       setBpm(initialSong.bpm ? initialSong.bpm.toString() : '');
-      
+
       // Parse Key (Simple parsing logic)
       const isMinor = initialSong.key.endsWith('m');
       const root = isMinor ? initialSong.key.slice(0, -1) : initialSong.key;
-      
+
       setKeyRoot(KEYS.includes(root) ? root : 'C');
       setKeyQuality(isMinor ? 'Minor' : 'Major');
 
@@ -73,7 +73,7 @@ With sections clearly marked`);
       setNotes('');
       setYoutubeUrl('');
       setAudioUrl('');
-      setIsPublic(false);
+      setIsPublic(true);
       setSharedGroupId('');
       setSelectedGenres([]);
       setTags([]);
@@ -109,7 +109,7 @@ With sections clearly marked`);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Reconstruct full key string
     const fullKey = `${keyRoot}${keyQuality === 'Minor' ? 'm' : ''}`;
 
@@ -174,7 +174,7 @@ With sections clearly marked`);
         <div>
           <label className="block text-xs font-medium text-slate-400 mb-1">Key</label>
           <div className="flex gap-1">
-            <select 
+            <select
               value={keyRoot}
               onChange={(e) => setKeyRoot(e.target.value)}
               className="w-2/3 bg-slate-950 border border-slate-800 rounded-l-lg px-2 py-2 text-white focus:outline-none focus:border-cyan-500 text-sm appearance-none"
@@ -193,8 +193,8 @@ With sections clearly marked`);
         </div>
 
         <div>
-           <label className="block text-xs font-medium text-slate-400 mb-1">BPM</label>
-           <input
+          <label className="block text-xs font-medium text-slate-400 mb-1">BPM</label>
+          <input
             type="number"
             value={bpm}
             onChange={(e) => setBpm(e.target.value)}
@@ -205,7 +205,7 @@ With sections clearly marked`);
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-         <div>
+        <div>
           <label className="block text-xs font-medium text-slate-400 mb-1">YouTube URL</label>
           <input
             type="text"
@@ -215,7 +215,7 @@ With sections clearly marked`);
             placeholder="https://youtube.com/..."
           />
         </div>
-         <div>
+        <div>
           <label className="block text-xs font-medium text-slate-400 mb-1">Audio URL (MP3/WAV)</label>
           <div className="relative">
             <input
@@ -239,11 +239,10 @@ With sections clearly marked`);
               key={genre}
               type="button"
               onClick={() => toggleGenre(genre)}
-              className={`px-3 py-1 text-xs rounded-full border transition-all ${
-                selectedGenres.includes(genre)
-                  ? 'bg-cyan-600 border-cyan-500 text-white'
-                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-600'
-              }`}
+              className={`px-3 py-1 text-xs rounded-full border transition-all ${selectedGenres.includes(genre)
+                ? 'bg-cyan-600 border-cyan-500 text-white'
+                : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-600'
+                }`}
             >
               {genre}
             </button>
@@ -311,7 +310,7 @@ With sections clearly marked`);
               <div className="text-sm font-medium text-purple-300 mb-1">
                 Allow Group Editing
               </div>
-              <select 
+              <select
                 value={sharedGroupId}
                 onChange={(e) => setSharedGroupId(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 rounded text-xs text-white py-1 px-2 focus:outline-none"

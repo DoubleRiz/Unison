@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import SongSheet from './SongSheet';
+import SongEditor from './SongEditor';
 import { transposeContent, transpose, getSectionType } from '../utils/musicLogic';
 
 const FAVORITES_ID = 'virtual_favorites';
@@ -37,6 +38,7 @@ interface SetlistEditorProps {
   allSongs: Song[];
   groups: Group[];
   onBack: () => void;
+  onSaveSong?: (song: Song, onSuccess?: () => void) => Promise<void>;
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -126,7 +128,7 @@ const SetlistCard: React.FC<SetlistCardProps> = ({ list, onDelete, onSelect }) =
 );
 
 // ──────────────────────────────────────────────────────────────────────────
-const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, onBack }) => {
+const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, onBack, onSaveSong }) => {
   const [setlists, setSetlists] = useState<Setlist[]>([]);
   const [currentSetlist, setCurrentSetlist] = useState<Setlist | null>(null);
   const [setlistItems, setSetlistItems] = useState<SetlistItem[]>([]);
@@ -198,6 +200,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   const [setlistToDelete, setSetlistToDelete] = useState<string | null>(null);
   const [performanceMode, setPerformanceMode] = useState(false);
   const [performanceIndex, setPerformanceIndex] = useState(0);
+  const [performanceEditingSong, setPerformanceEditingSong] = useState<Song | null>(null);
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfTitle, setPdfTitle] = useState('');
 
@@ -593,6 +596,41 @@ const favoriteSetlist: Setlist = {
 
 if (performanceMode && currentSetlist) {
   const currentItem = setlistItems[performanceIndex];
+
+  if (performanceEditingSong && onSaveSong) {
+    const existingTags = [...new Set(allSongs.flatMap(s => s.tags || []))];
+    return (
+      <div className="fixed inset-0 bg-slate-950 z-50 flex flex-col">
+        <div className="h-16 bg-slate-900 border-b border-slate-800 flex items-center px-6 shrink-0">
+          <button onClick={() => setPerformanceEditingSong(null)} className="text-slate-400 hover:text-white shrink-0 flex items-center gap-2">
+            <ChevronLeft size={24} />
+            <span className="text-sm">Back to Perform</span>
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <SongEditor
+            initialSong={performanceEditingSong}
+            groups={groups}
+            existingTags={existingTags}
+            onSave={(song) => {
+              onSaveSong(song, () => {
+                setSetlistItems(items =>
+                  items.map(item =>
+                    item.type === 'song' && item.song.id === song.id
+                      ? { ...item, song }
+                      : item
+                  )
+                );
+                setPerformanceEditingSong(null);
+              });
+            }}
+            onCancel={() => setPerformanceEditingSong(null)}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 bg-slate-950 z-50 flex flex-col">
       <div className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 shrink-0">
@@ -604,6 +642,15 @@ if (performanceMode && currentSetlist) {
           </div>
         </div>
         <div className="flex items-center gap-4">
+          {currentItem.type === 'song' && onSaveSong && (
+            <button
+              onClick={() => setPerformanceEditingSong(currentItem.song)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 text-sm font-medium text-slate-300 hover:text-white transition-colors"
+            >
+              <Edit2 size={18} />
+              <span className="hidden sm:inline">Edit</span>
+            </button>
+          )}
           <button
             onClick={() => setNotationMode(m => m === NotationMode.LETTERS ? NotationMode.DEGREES : NotationMode.LETTERS)}
             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 text-sm font-medium text-slate-300 hover:text-white transition-colors"
@@ -813,7 +860,7 @@ const isVirtual = currentSetlist?.id === FAVORITES_ID;
       )}
 
       {showPdfModal && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
         <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl w-96 shadow-2xl">
           <h3 className="text-xl font-bold text-white mb-4">Export PDF</h3>
           <div className="mb-3">

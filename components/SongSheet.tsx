@@ -470,7 +470,11 @@ const SongSheet: React.FC<SongSheetProps> = ({
                   if (isCurrentLineChords) {
                     return (
                       <div key={segIdx} className="flex flex-row flex-nowrap flex-shrink-0" style={segmentStyle}>
-                        {chordString && showChords && renderChordDisplay(chordString, segment.chord)}
+                        {chordString && showChords && (
+                          <ChordTooltip chord={chordString}>
+                            {renderChordDisplay(chordString, segment.chord)}
+                          </ChordTooltip>
+                        )}
                         <span className="whitespace-pre text-slate-500">{segment.lyrics}</span>
                       </div>
                     );
@@ -481,7 +485,9 @@ const SongSheet: React.FC<SongSheetProps> = ({
                     <div key={segIdx} className="flex flex-row items-baseline flex-shrink-0" style={segmentStyle}>
                       {chordString && showChords && (
                         <span className="font-bold text-cyan-600 dark:text-cyan-400 mr-1 select-none">
-                          {renderChordDisplay(chordString, segment.chord)}
+                          <ChordTooltip chord={chordString}>
+                            {renderChordDisplay(chordString, segment.chord)}
+                          </ChordTooltip>
                         </span>
                       )}
                       <span className="text-slate-800 dark:text-slate-300 whitespace-pre">

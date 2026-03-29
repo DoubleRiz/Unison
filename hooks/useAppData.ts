@@ -86,7 +86,7 @@ export const useAppData = (session: any, currentView: string, currentSongId: str
         query = query.order('updated_at', { ascending: false });
       } else {
         // Guest: fetch top public songs for search/random functionality
-        query = query.eq('is_public', true).order('created_at', { ascending: false }).limit(50);
+        query = query.eq('is_public', true).order('created_at', { ascending: false });
       }
 
       const { data: songsData, error: songsError } = await query;
