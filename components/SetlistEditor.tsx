@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Song, Setlist, SetlistTextNote, NotationMode, Group } from '../types';
+import { Song, Setlist, SetlistTextNote, NotationMode, Group, SongItem, TextItem, SetlistItem } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import {
   Plus,
@@ -43,25 +43,6 @@ interface SetlistEditorProps {
   onBack: () => void;
   onSaveSong?: (song: Song, onSuccess?: () => void) => Promise<void>;
 }
-
-// ── Types ──────────────────────────────────────────────────────────────────
-interface SongItem {
-  type: 'song';
-  id: string;
-  song: Song;
-  transpose: number;
-}
-
-
-interface TextItem {
-  type: 'text';
-  id: string;
-  content: string;
-  color: string;          // 'default' | 'amber' | 'cyan' | 'purple' | 'red'
-  size: 'sm' | 'md' | 'lg';
-}
-
-type SetlistItem = SongItem | TextItem;
 
 const generateId = () => `txt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 

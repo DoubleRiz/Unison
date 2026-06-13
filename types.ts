@@ -45,6 +45,7 @@ export interface Setlist {
   title: string;
   created_at: string;
   text_notes?: SetlistTextNote[];
+  layout_document?: TiptapDoc | null;
   songs?: Song[]; // Optional, used for UI display only
 }
 
@@ -53,6 +54,47 @@ export interface SetlistSong {
   setlist_id: string;
   song_id: string;
   position: number;
+}
+
+export interface SongItem {
+  type: 'song';
+  id: string;
+  song: Song;
+  transpose: number;
+}
+
+export interface TextItem {
+  type: 'text';
+  id: string;
+  content: string;
+  color: string;
+  size: 'sm' | 'md' | 'lg';
+}
+
+export type SetlistItem = SongItem | TextItem;
+
+export interface TiptapMark {
+  type: string;
+  attrs?: Record<string, any>;
+}
+
+export interface TiptapNode {
+  type: string;
+  attrs?: Record<string, any>;
+  content?: TiptapNode[];
+  text?: string;
+  marks?: TiptapMark[];
+}
+
+export interface TiptapDoc {
+  type: 'doc';
+  content: TiptapNode[];
+}
+
+export interface SongBlockAttrs {
+  setlistSongId: string;
+  songId: string;
+  transpose: number;
 }
 
 export interface Group {
