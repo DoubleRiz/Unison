@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildInitialDocument } from './setlistDocument';
-import { SetlistItem, Song } from '../types';
+import { buildInitialDocument, getSongBlockIds, removeOrphanSongBlocks } from './setlistDocument';
+import { SetlistItem, Song, TiptapDoc } from '../types';
 
 const makeSong = (id: string): Song => ({
   id,
@@ -59,5 +59,51 @@ describe('buildInitialDocument', () => {
       type: 'paragraph',
       content: [{ type: 'text', text: 'Note' }],
     });
+  });
+});
+
+describe('getSongBlockIds', () => {
+  it('returns setlistSongId of songBlock nodes in document order', () => {
+    const doc: TiptapDoc = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph' },
+        { type: 'songBlock', attrs: { setlistSongId: 'a', songId: 's-a', transpose: 0 } },
+        { type: 'paragraph' },
+        { type: 'songBlock', attrs: { setlistSongId: 'b', songId: 's-b', transpose: 0 } },
+      ],
+    };
+    expect(getSongBlockIds(doc)).toEqual(['a', 'b']);
+  });
+
+  it('returns an empty array when there are no song blocks', () => {
+    const doc: TiptapDoc = { type: 'doc', content: [{ type: 'paragraph' }] };
+    expect(getSongBlockIds(doc)).toEqual([]);
+  });
+});
+
+describe('removeOrphanSongBlocks', () => {
+  it('removes songBlock nodes whose setlistSongId is not in the valid set', () => {
+    const doc: TiptapDoc = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph' },
+        { type: 'songBlock', attrs: { setlistSongId: 'a', songId: 's-a', transpose: 0 } },
+        { type: 'paragraph' },
+        { type: 'songBlock', attrs: { setlistSongId: 'b', songId: 's-b', transpose: 0 } },
+      ],
+    };
+    const result = removeOrphanSongBlocks(doc, new Set(['a']));
+    expect(getSongBlockIds(result)).toEqual(['a']);
+    expect(result.content).toHaveLength(3);
+  });
+
+  it('keeps the document unchanged when all song blocks are valid', () => {
+    const doc: TiptapDoc = {
+      type: 'doc',
+      content: [{ type: 'songBlock', attrs: { setlistSongId: 'a', songId: 's-a', transpose: 0 } }],
+    };
+    const result = removeOrphanSongBlocks(doc, new Set(['a']));
+    expect(result).toEqual(doc);
   });
 });

@@ -43,3 +43,15 @@ export const buildInitialDocument = (items: SetlistItem[]): TiptapDoc => {
 
   return { type: 'doc', content };
 };
+
+export const getSongBlockIds = (doc: TiptapDoc): string[] =>
+  doc.content
+    .filter((node) => node.type === 'songBlock')
+    .map((node) => node.attrs!.setlistSongId as string);
+
+export const removeOrphanSongBlocks = (doc: TiptapDoc, validSetlistSongIds: Set<string>): TiptapDoc => ({
+  ...doc,
+  content: doc.content.filter(
+    (node) => node.type !== 'songBlock' || validSetlistSongIds.has(node.attrs!.setlistSongId as string)
+  ),
+});
