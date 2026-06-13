@@ -30,12 +30,21 @@ export interface Comment {
   };
 }
 
+export interface SetlistTextNote {
+  id: string;
+  content: string;
+  color: string;
+  size: 'sm' | 'md' | 'lg';
+  position: number;
+}
+
 export interface Setlist {
   id: string;
   user_id: string;
   group_id?: string | null;
   title: string;
   created_at: string;
+  text_notes?: SetlistTextNote[];
   songs?: Song[]; // Optional, used for UI display only
 }
 

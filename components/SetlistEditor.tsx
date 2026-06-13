@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Song, Setlist, NotationMode, Group } from '../types';
+import { Song, Setlist, SetlistTextNote, NotationMode, Group } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import {
   Plus,
@@ -77,30 +77,7 @@ const TEXT_SIZES: Record<string, { label: string; description: string; pdfFontSi
   lg: { label: 'L', description: 'Large', pdfFontSize: 17, pdfLineSpacing: 10, uiClass: 'text-base font-semibold' },
 };
 
-// ── localStorage helpers ───────────────────────────────────────────────────
 const generateId = () => `txt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-const getOrderKey = (setlistId: string) => `setlist_full_order_${setlistId}`;
-
-const saveFullOrder = (setlistId: string, items: SetlistItem[]) => {
-  const orderData = items.map(item => ({
-    type: item.type,
-    id: item.id,
-    ...(item.type === 'text' ? { content: item.content, color: item.color, size: item.size } : {}),
-  }));
-  localStorage.setItem(getOrderKey(setlistId), JSON.stringify(orderData));
-};
-
-type StoredEntry = { type: string; id: string; content?: string; color?: string; size?: string };
-
-const loadFullOrder = (setlistId: string): StoredEntry[] => {
-  try {
-    const raw = localStorage.getItem(getOrderKey(setlistId));
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-};
 
 // ── SetlistCard ───────────────────────────────────────────────────────────
 interface SetlistCardProps {
@@ -182,15 +159,15 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
       };
       const newItems = [...setlistItems, newNote];
       setSetlistItems(newItems);
-      saveFullOrder(currentSetlist.id, newItems);
+      persistTextNotes(newItems);
     } else {
-      const newItems = setlistItems.map(item => 
-        item.id === editingTextId && item.type === 'text' 
-          ? { ...item, content: editingTextValue.trim(), color: editingTextColor, size: editingTextSize } 
+      const newItems = setlistItems.map(item =>
+        item.id === editingTextId && item.type === 'text'
+          ? { ...item, content: editingTextValue.trim(), color: editingTextColor, size: editingTextSize }
           : item
       );
       setSetlistItems(newItems);
-      saveFullOrder(currentSetlist.id, newItems);
+      persistTextNotes(newItems);
     }
     setEditingTextId(null);
   };
@@ -241,42 +218,55 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
       return;
     }
 
-    const { data, error } = await supabase
-      .from('setlist_songs')
-      .select('*')
-      .eq('setlist_id', setlistId)
-      .order('position', { ascending: true });
+    const [{ data, error }, { data: setlistRow, error: setlistError }] = await Promise.all([
+      supabase
+        .from('setlist_songs')
+        .select('*')
+        .eq('setlist_id', setlistId)
+        .order('position', { ascending: true }),
+      supabase
+        .from('setlists')
+        .select('text_notes')
+        .eq('id', setlistId)
+        .single()
+    ]);
 
-    if (!error && data) {
-      const songItems: SongItem[] = data.map((item: any) => {
+    if (!error && data && !setlistError) {
+      const songItems = data.map((item: any) => {
         const song = allSongs.find(s => s.id === item.song_id);
         if (!song) return null;
-        return { type: 'song' as const, id: item.id, song, transpose: item.transpose || 0 };
-      }).filter(Boolean) as SongItem[];
+        return { type: 'song' as const, id: item.id, song, transpose: item.transpose || 0, position: item.position };
+      }).filter(Boolean) as (SongItem & { position: number })[];
 
-      const savedOrder = loadFullOrder(setlistId);
-      if (savedOrder.length === 0) { setSetlistItems(songItems); return; }
+      const textItems = ((setlistRow?.text_notes || []) as SetlistTextNote[]).map(note => ({
+        type: 'text' as const,
+        id: note.id,
+        content: note.content,
+        color: note.color,
+        size: note.size,
+        position: note.position,
+      }));
 
-      const songMap = new Map(songItems.map(s => [s.id, s]));
-      const merged: SetlistItem[] = [];
+      const merged = [...songItems, ...textItems]
+        .sort((a, b) => a.position - b.position)
+        .map(({ position, ...rest }) => rest as SetlistItem);
 
-      savedOrder.forEach(entry => {
-        if (entry.type === 'song') {
-          const s = songMap.get(entry.id);
-          if (s) { merged.push(s); songMap.delete(entry.id); }
-        } else if (entry.type === 'text') {
-          merged.push({
-            type: 'text',
-            id: entry.id,
-            content: entry.content || '',
-            color: entry.color || 'amber',
-            size: (entry.size as 'sm' | 'md' | 'lg') || 'md',
-          });
-        }
-      });
-      songMap.forEach(s => merged.push(s));
       setSetlistItems(merged);
     }
+  };
+
+  // ── Text notes persistence ───────────────────────────────────────────────
+  const persistTextNotes = async (items: SetlistItem[]) => {
+    if (!currentSetlist) return;
+    const textNotes: SetlistTextNote[] = items
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.type === 'text')
+      .map(({ item, index }) => {
+        const t = item as TextItem;
+        return { id: t.id, content: t.content, color: t.color, size: t.size, position: index };
+      });
+    await supabase.from('setlists').update({ text_notes: textNotes }).eq('id', currentSetlist.id);
+    setCurrentSetlist({ ...currentSetlist, text_notes: textNotes });
   };
 
   // ── Setlist CRUD ─────────────────────────────────────────────────────────
@@ -321,7 +311,6 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
 
     // Correctly use the setSetlistToDelete setter instead of calling the state value itself.
     await supabase.from('setlists').delete().eq('id', setlistToDelete);
-    localStorage.removeItem(getOrderKey(setlistToDelete));
     setSetlists(setlists.filter(s => s.id !== setlistToDelete));
     if (currentSetlist?.id === setlistToDelete) setCurrentSetlist(null);
     setShowDeleteModal(false);
@@ -342,26 +331,27 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
       alert("Song already in setlist");
       return;
     }
-    const songCount = setlistItems.filter(i => i.type === 'song').length;
     const { data, error } = await supabase.from('setlist_songs')
-      .insert({ setlist_id: currentSetlist.id, song_id: song.id, position: songCount, transpose: 0 })
+      .insert({ setlist_id: currentSetlist.id, song_id: song.id, position: setlistItems.length, transpose: 0 })
       .select().single();
     if (!error && data) {
       const newItems = [...setlistItems, { type: 'song' as const, id: data.id, song, transpose: 0 }];
       setSetlistItems(newItems);
-      saveFullOrder(currentSetlist.id, newItems);
     }
   };
 
   const removeItemFromSetlist = async (itemId: string) => {
     if (currentSetlist?.id === FAVORITES_ID) return;
 
-    await supabase
-      .from('setlist_songs')
-      .delete()
-      .eq('id', itemId);
+    const item = setlistItems.find(i => i.id === itemId);
+    const newItems = setlistItems.filter(s => s.id !== itemId);
+    setSetlistItems(newItems);
 
-    setSetlistItems(setlistItems.filter(s => s.id !== itemId));
+    if (item?.type === 'song') {
+      await supabase.from('setlist_songs').delete().eq('id', itemId);
+    } else if (item?.type === 'text') {
+      await persistTextNotes(newItems);
+    }
   };
 
   const updateItemTranspose = async (itemId: string, newTranspose: number) => {
@@ -390,16 +380,21 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
 
   const updateAllPositions = async (items: SetlistItem[]) => {
     if (!currentSetlist) return;
-    saveFullOrder(currentSetlist.id, items);
     const songUpdates = items
-      .filter((item): item is SongItem => item.type === 'song')
-      .map((item, index) => ({
-        id: item.id,
-        setlist_id: currentSetlist.id,
-        song_id: item.song.id,
-        position: index,
-        transpose: item.transpose
-      }));
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.type === 'song')
+      .map(({ item, index }) => {
+        const songItem = item as SongItem;
+        return {
+          id: songItem.id,
+          setlist_id: currentSetlist.id,
+          song_id: songItem.song.id,
+          position: index,
+          transpose: songItem.transpose
+        };
+      });
+
+    await persistTextNotes(items);
     if (songUpdates.length > 0) {
       await supabase.from('setlist_songs').upsert(songUpdates);
     }
