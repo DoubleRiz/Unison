@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Song, Setlist, SetlistTextNote, NotationMode, Group, SongItem, TextItem, SetlistItem } from '../types';
+import { Song, Setlist, SetlistTextNote, NotationMode, Group, SongItem, TextItem, SetlistItem, TiptapDoc } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import {
   Plus,
@@ -438,6 +438,28 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     if (songUpdates.length > 0) {
       await supabase.from('setlist_songs').upsert(songUpdates);
     }
+  };
+
+  const handleDocumentSongOrderChange = async (orderedSetlistSongIds: string[]) => {
+    const songItemsById = new Map(
+      setlistItems.filter((item): item is SongItem => item.type === 'song').map((item) => [item.id, item])
+    );
+    const textItems = setlistItems.filter((item) => item.type === 'text');
+    const reorderedSongs = orderedSetlistSongIds
+      .map((id) => songItemsById.get(id))
+      .filter((item): item is SongItem => item !== undefined);
+
+    const newItems: SetlistItem[] = [...reorderedSongs, ...textItems];
+    setSetlistItems(newItems);
+    await updateAllPositions(newItems);
+  };
+
+  const handleDocumentSongInserted = (newItem: SongItem) => {
+    setSetlistItems((items) => [...items, newItem]);
+  };
+
+  const handleLayoutDocumentChange = (doc: TiptapDoc) => {
+    setCurrentSetlist((prev) => (prev ? { ...prev, layout_document: doc } : prev));
   };
 
   const handleDragEnd = async (e: React.DragEvent<HTMLDivElement>) => {
