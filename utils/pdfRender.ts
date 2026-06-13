@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
-import { Song } from '../types';
+import { Song, TiptapNode } from '../types';
 import { transposeContent, transpose, getSectionType } from './musicLogic';
+import { flattenParagraphRuns, tokenizeRuns, wrapTokensToLines, TextToken } from './setlistDocumentText';
 
 export interface PdfContext {
   doc: jsPDF;
@@ -108,5 +109,105 @@ export const renderSongToPdf = (ctx: PdfContext, song: Song, transposeSemitones:
       doc.text(nl, margin, ctx.cursorY);
       ctx.cursorY += 4.5;
     });
+  }
+};
+
+const FONT_SIZE_NORMAL = 11;
+const HEADING_FONT_SIZES: Record<number, number> = { 1: 18, 2: 14, 3: 12 };
+const LINE_HEIGHT_RATIO = 0.5;
+
+const lineHeightFor = (fontSize: number): number => fontSize * LINE_HEIGHT_RATIO;
+
+const fontStyleFor = (token: TextToken): string => {
+  if (token.bold && token.italic) return 'bolditalic';
+  if (token.bold) return 'bold';
+  if (token.italic) return 'italic';
+  return 'normal';
+};
+
+export const renderParagraphToPdf = (
+  ctx: PdfContext,
+  node: TiptapNode,
+  fontSize: number,
+  prefix: string,
+  textAlign: string
+): void => {
+  const runs = flattenParagraphRuns(node);
+  const lineHeight = lineHeightFor(fontSize);
+
+  if (runs.length === 0 || runs.every((r) => r.text.trim() === '')) {
+    ctx.cursorY += lineHeight;
+    return;
+  }
+
+  ctx.doc.setFontSize(fontSize);
+  const measure = (text: string, token: TextToken): number => {
+    ctx.doc.setFont('helvetica', fontStyleFor(token));
+    return ctx.doc.getTextWidth(text);
+  };
+
+  const prefixWidth = prefix ? ctx.doc.getTextWidth(prefix) : 0;
+  const tokens = tokenizeRuns(runs);
+  const lines = wrapTokensToLines(tokens, ctx.contentWidth - prefixWidth, measure);
+
+  lines.forEach((line, lineIndex) => {
+    if (ctx.cursorY > ctx.pageHeight - ctx.margin) startNewPage(ctx);
+
+    const lineWidth = line.reduce((sum, token) => sum + measure(token.text, token), 0)
+      + (lineIndex === 0 ? prefixWidth : 0);
+
+    let x = ctx.margin;
+    if (textAlign === 'center') x = ctx.margin + (ctx.contentWidth - lineWidth) / 2;
+    if (textAlign === 'right') x = ctx.margin + ctx.contentWidth - lineWidth;
+
+    if (lineIndex === 0 && prefix) {
+      ctx.doc.setFont('helvetica', 'normal');
+      ctx.doc.setTextColor(0, 0, 0);
+      ctx.doc.text(prefix, x, ctx.cursorY);
+      x += prefixWidth;
+    }
+
+    line.forEach((token) => {
+      const width = measure(token.text, token);
+      if (token.text.trim() !== '') {
+        if (token.color) ctx.doc.setTextColor(token.color[0], token.color[1], token.color[2]);
+        else ctx.doc.setTextColor(0, 0, 0);
+        ctx.doc.text(sanitizePdfText(token.text), x, ctx.cursorY);
+      }
+      x += width;
+    });
+
+    ctx.cursorY += lineHeight;
+  });
+};
+
+export const renderTextNodeToPdf = (ctx: PdfContext, node: TiptapNode): void => {
+  const textAlign = (node.attrs?.textAlign as string) || 'left';
+
+  switch (node.type) {
+    case 'heading': {
+      const level = (node.attrs?.level as number) || 1;
+      renderParagraphToPdf(ctx, node, HEADING_FONT_SIZES[level] || FONT_SIZE_NORMAL, '', textAlign);
+      return;
+    }
+    case 'paragraph':
+      renderParagraphToPdf(ctx, node, FONT_SIZE_NORMAL, '', textAlign);
+      return;
+    case 'bulletList':
+      (node.content || []).forEach((item) =>
+        (item.content || []).forEach((child) =>
+          renderParagraphToPdf(ctx, child, FONT_SIZE_NORMAL, '• ', (child.attrs?.textAlign as string) || 'left')
+        )
+      );
+      return;
+    case 'orderedList':
+      (node.content || []).forEach((item, index) =>
+        (item.content || []).forEach((child) =>
+          renderParagraphToPdf(ctx, child, FONT_SIZE_NORMAL, `${index + 1}. `, (child.attrs?.textAlign as string) || 'left')
+        )
+      );
+      return;
+    default:
+      return;
   }
 };
