@@ -24,7 +24,9 @@ import {
   Check,
   Heart,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  Copy,
+  MoreVertical
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import SongSheet from './SongSheet';
@@ -83,10 +85,11 @@ const generateId = () => `txt_${Date.now()}_${Math.random().toString(36).slice(2
 interface SetlistCardProps {
   list: Setlist;
   onDelete: (id: string, e: React.MouseEvent) => void;
+  onDuplicate: (id: string, e: React.MouseEvent) => void;
   onSelect: (l: Setlist) => void;
 }
 
-const SetlistCard: React.FC<SetlistCardProps> = ({ list, onDelete, onSelect }) => (
+const SetlistCard: React.FC<SetlistCardProps> = ({ list, onDelete, onDuplicate, onSelect }) => (
   <div onClick={() => onSelect(list)}
     className="bg-slate-900 border border-slate-800 rounded-xl p-6 cursor-pointer hover:border-cyan-500/50 transition-all group relative">
     <div className="flex justify-between items-start">
@@ -97,9 +100,14 @@ const SetlistCard: React.FC<SetlistCardProps> = ({ list, onDelete, onSelect }) =
           {new Date(list.created_at).toLocaleDateString()}
         </div>
       </div>
-      <button onClick={(e) => onDelete(list.id, e)} className="text-slate-600 hover:text-red-400 p-2">
-        <Trash2 size={18} />
-      </button>
+      <div className="flex items-center">
+        <button onClick={(e) => onDuplicate(list.id, e)} className="text-slate-600 hover:text-cyan-400 p-2">
+          <Copy size={18} />
+        </button>
+        <button onClick={(e) => onDelete(list.id, e)} className="text-slate-600 hover:text-red-400 p-2">
+          <Trash2 size={18} />
+        </button>
+      </div>
     </div>
   </div>
 );
@@ -119,6 +127,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
 
   // Scroll to library helper
   const libraryRef = useRef<HTMLDivElement>(null);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
   const jumpToLibrary = () => {
     libraryRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -175,6 +184,9 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   const [notationMode, setNotationMode] = useState<NotationMode>(NotationMode.LETTERS);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [setlistToDelete, setSetlistToDelete] = useState<string | null>(null);
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [setlistToDuplicate, setSetlistToDuplicate] = useState<string | null>(null);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [performanceMode, setPerformanceMode] = useState(false);
   const [performanceIndex, setPerformanceIndex] = useState(0);
   const [performanceEditingSong, setPerformanceEditingSong] = useState<Song | null>(null);
@@ -299,8 +311,60 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     }
   };
 
-  const confirmDeleteSetlist = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const confirmDuplicateSetlist = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (id === FAVORITES_ID) return;
+    setSetlistToDuplicate(id);
+    setShowDuplicateModal(true);
+  };
+
+  const executeDuplicateSetlist = async () => {
+    if (!setlistToDuplicate) return;
+    const original = setlists.find(s => s.id === setlistToDuplicate);
+    if (!original) {
+      setShowDuplicateModal(false);
+      setSetlistToDuplicate(null);
+      return;
+    }
+
+    const { data: newSetlist, error } = await supabase
+      .from('setlists')
+      .insert([{
+        title: `${original.title} (copie)`,
+        user_id: user.id,
+        group_id: original.group_id ?? null,
+        text_notes: original.text_notes || [],
+      }])
+      .select()
+      .single();
+
+    if (!error && newSetlist) {
+      const { data: songs } = await supabase
+        .from('setlist_songs')
+        .select('song_id, position, transpose')
+        .eq('setlist_id', original.id);
+
+      if (songs && songs.length > 0) {
+        await supabase.from('setlist_songs').insert(
+          songs.map(s => ({
+            setlist_id: newSetlist.id,
+            song_id: s.song_id,
+            position: s.position,
+            transpose: s.transpose,
+          }))
+        );
+      }
+
+      setSetlists([newSetlist, ...setlists]);
+      handleSelectSetlist(newSetlist);
+    }
+
+    setShowDuplicateModal(false);
+    setSetlistToDuplicate(null);
+  };
+
+  const confirmDeleteSetlist = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (id === FAVORITES_ID) return;
     setSetlistToDelete(id);
     setShowDeleteModal(true);
@@ -322,6 +386,17 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     fetchSetlistItems(setlist.id);
     setPerformanceMode(false);
   };
+
+  useEffect(() => {
+    if (!showActionsMenu) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (actionsMenuRef.current && !actionsMenuRef.current.contains(event.target as Node)) {
+        setShowActionsMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showActionsMenu]);
 
   // ── Song management ──────────────────────────────────────────────────────
   const addSongToSetlist = async (song: Song) => {
@@ -716,6 +791,26 @@ if (!currentSetlist) {
         </div>
       )}
 
+      {showDuplicateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-sm w-full shadow-2xl">
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="w-12 h-12 bg-cyan-900/20 text-cyan-400 rounded-full flex items-center justify-center mb-4">
+                <Copy size={24} />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">Duplicate Setlist?</h3>
+              <p className="text-slate-400 text-sm">A copy of this setlist will be created with all its songs.</p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setShowDuplicateModal(false)}
+                className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-medium transition-colors">Cancel</button>
+              <button onClick={executeDuplicateSetlist}
+                className="flex-1 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors">Duplicate</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mb-8 border-b border-slate-800 pb-6 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-white mb-2">My Setlists</h1>
@@ -772,7 +867,7 @@ if (!currentSetlist) {
             </div>
 
             {personalSetlists.map(list => (
-              <SetlistCard key={list.id} list={list} onDelete={confirmDeleteSetlist} onSelect={handleSelectSetlist} />
+              <SetlistCard key={list.id} list={list} onDelete={confirmDeleteSetlist} onDuplicate={confirmDuplicateSetlist} onSelect={handleSelectSetlist} />
             ))}
           </div>
         </div>
@@ -781,7 +876,7 @@ if (!currentSetlist) {
           <div key={g.group.id}>
             <h3 className="text-white font-bold mb-4 flex items-center gap-2"><Users size={18} className="text-cyan-400" /> {g.group.name}</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {g.lists.map(list => <SetlistCard key={list.id} list={list} onDelete={confirmDeleteSetlist} onSelect={handleSelectSetlist} />)}
+              {g.lists.map(list => <SetlistCard key={list.id} list={list} onDelete={confirmDeleteSetlist} onDuplicate={confirmDuplicateSetlist} onSelect={handleSelectSetlist} />)}
             </div>
           </div>
         ))}
@@ -794,6 +889,46 @@ const isVirtual = currentSetlist?.id === FAVORITES_ID;
 
   return (
     <div className="max-w-6xl mx-auto min-h-[calc(100vh-140px)] flex flex-col relative px-4 sm:px-0">
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-sm w-full shadow-2xl">
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="w-12 h-12 bg-red-900/20 text-red-500 rounded-full flex items-center justify-center mb-4">
+                <AlertTriangle size={24} />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">Delete Setlist?</h3>
+              <p className="text-slate-400 text-sm">Are you sure? This action cannot be undone.</p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setShowDeleteModal(false)}
+                className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-medium transition-colors">Cancel</button>
+              <button onClick={executeDeleteSetlist}
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDuplicateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-sm w-full shadow-2xl">
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="w-12 h-12 bg-cyan-900/20 text-cyan-400 rounded-full flex items-center justify-center mb-4">
+                <Copy size={24} />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">Duplicate Setlist?</h3>
+              <p className="text-slate-400 text-sm">A copy of this setlist will be created with all its songs.</p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setShowDuplicateModal(false)}
+                className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-medium transition-colors">Cancel</button>
+              <button onClick={executeDuplicateSetlist}
+                className="flex-1 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors">Duplicate</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {editingTextId !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 max-w-md w-full shadow-2xl">
@@ -944,6 +1079,33 @@ const isVirtual = currentSetlist?.id === FAVORITES_ID;
           className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-lg font-medium transition-colors disabled:opacity-50 text-sm sm:text-base">
           <FileDown size={18} /> <span className="hidden sm:inline">Export PDF</span><span className="sm:hidden">PDF</span>
         </button>
+
+        {!isVirtual && (
+          <div className="relative" ref={actionsMenuRef}>
+            <button
+              onClick={() => setShowActionsMenu(v => !v)}
+              className="flex items-center justify-center p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors"
+            >
+              <MoreVertical size={18} />
+            </button>
+            {showActionsMenu && (
+              <div className="absolute right-0 mt-2 w-44 bg-slate-900 border border-slate-800 rounded-lg shadow-2xl z-40 overflow-hidden">
+                <button
+                  onClick={() => { setShowActionsMenu(false); confirmDuplicateSetlist(currentSetlist.id); }}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-cyan-400 transition-colors text-left"
+                >
+                  <Copy size={16} /> Duplicate
+                </button>
+                <button
+                  onClick={() => { setShowActionsMenu(false); confirmDeleteSetlist(currentSetlist.id); }}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-red-400 transition-colors text-left"
+                >
+                  <Trash2 size={16} /> Delete
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
 
