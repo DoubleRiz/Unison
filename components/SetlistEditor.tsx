@@ -1156,6 +1156,7 @@ const isVirtual = currentSetlist?.id === FAVORITES_ID;
     </div>
     ) : (
       <SetlistDocumentEditor
+        key={currentSetlist.id}
         setlist={currentSetlist}
         setlistItems={setlistItems}
         allSongs={allSongs}

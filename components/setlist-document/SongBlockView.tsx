@@ -17,6 +17,18 @@ export const SongBlockView: React.FC<NodeViewProps> = ({ node, updateAttributes,
     actions.onTransposeChange(setlistSongId, newTranspose);
   };
 
+  const removeBlock = () => {
+    const pos = getPos();
+    editor
+      .chain()
+      .command(({ tr }) => {
+        tr.delete(pos, pos + node.nodeSize);
+        return true;
+      })
+      .run();
+    actions.onRemove(setlistSongId);
+  };
+
   const moveBy = (offset: number) => {
     const pos = getPos();
     const $pos = editor.state.doc.resolve(pos);
@@ -86,7 +98,7 @@ export const SongBlockView: React.FC<NodeViewProps> = ({ node, updateAttributes,
           <Plus size={12} />
         </button>
       </div>
-      <button type="button" onClick={() => actions.onRemove(setlistSongId)} className="p-1 text-slate-400 dark:text-slate-500 hover:text-red-500 shrink-0">
+      <button type="button" onClick={removeBlock} className="p-1 text-slate-400 dark:text-slate-500 hover:text-red-500 shrink-0">
         <X size={16} />
       </button>
     </NodeViewWrapper>
