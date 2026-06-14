@@ -28,12 +28,12 @@ import {
   Copy,
   MoreVertical
 } from 'lucide-react';
-import { jsPDF } from 'jspdf';
 import SongSheet from './SongSheet';
 import SongEditor from './SongEditor';
 import { SetlistDocumentEditor } from './setlist-document/SetlistDocumentEditor';
-import { transposeContent, transpose, getSectionType } from '../utils/musicLogic';
 import { TEXT_COLORS, TEXT_SIZES } from '../constants/textNoteStyles';
+import { buildInitialDocument } from '../utils/setlistDocument';
+import { exportLayoutDocumentToPdf } from '../utils/setlistDocumentPdf';
 
 const FAVORITES_ID = 'virtual_favorites';
 
@@ -501,149 +501,8 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     if (!currentSetlist || setlistItems.length === 0) return;
     setShowPdfModal(false);
 
-    const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.width;
-    const pageHeight = doc.internal.pageSize.height;
-    const margin = 15;
-    const contentWidth = pageWidth - (margin * 2);
-    const songLineH = 5.2;
-
-    const newPage = () => {
-      doc.addPage();
-      return 20; 
-    };
-
-    let cursorY = 20;
-
-    const sanitizePdfText = (text: string) => {
-      return text
-        .replace(/[\u00A0\u2000-\u200b\u202f\u205f\u3000]/g, ' ')
-        .replace(/\t/g, '    ')
-        .replace(/[‘’`]/g, "'")
-        .replace(/[“”]/g, '"')
-        .replace(/…/g, '...')
-        .replace(/œ/g, 'oe').replace(/Œ/g, 'Oe')
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    };
-
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(150);
-    doc.text(pdfTitle, margin, 10);
-    doc.text(`Setlist Export`, pageWidth - margin, 10, { align: 'right' });
-
-    setlistItems.forEach((item, index) => {
-      if (item.type === 'text') {
-        const color = TEXT_COLORS[item.color] || TEXT_COLORS.default;
-        const size = TEXT_SIZES[item.size] || TEXT_SIZES.md;
-        
-        doc.setFontSize(size.pdfFontSize);
-        doc.setTextColor(color.pdfRgb[0], color.pdfRgb[1], color.pdfRgb[2]);
-        doc.setFont("helvetica", "bold");
-        
-        const lines = doc.splitTextToSize(item.content, contentWidth);
-        const textHeightTotal = lines.length * size.pdfLineSpacing;
-        
-        if (cursorY + textHeightTotal > pageHeight - margin) cursorY = newPage();
-        
-        lines.forEach((line: string) => {
-          if (cursorY > pageHeight - margin) cursorY = newPage();
-          doc.text(line, margin, cursorY);
-          cursorY += size.pdfLineSpacing;
-        });
-        
-        cursorY += 10;
-        return;
-      }
-
-      const song = item.song;
-
-      if (cursorY + 30 > pageHeight - margin) cursorY = newPage();
-
-      doc.setFontSize(24);
-      doc.setTextColor(0);
-      doc.setFont("helvetica", "bold");
-      doc.text(song.title, margin, cursorY);
-      cursorY += 7;
-
-      doc.setFontSize(12);
-      doc.setFont("helvetica", "normal");
-      const keyText = item.transpose !== 0
-        ? `${song.key} (${item.transpose > 0 ? '+' : ''}${item.transpose}) -> ${transpose(song.key, item.transpose)}`
-        : song.key;
-
-      doc.text(`${song.artist} • ${keyText}`, margin, cursorY);
-      cursorY += 13;
-
-      doc.setFont("courier", "normal");
-      doc.setFontSize(11);
-
-      const transposedContent = transposeContent(song.content, item.transpose);
-      const lines = transposedContent.split(/\r?\n/);
-
-      lines.forEach(line => {
-        if (cursorY > pageHeight - margin) {
-          cursorY = newPage();
-        }
-
-        const sectionName = getSectionType(line);
-        if (sectionName) {
-          cursorY += 3;
-          doc.setFont("courier", "bold");
-          doc.setFontSize(11);
-          doc.setTextColor(0, 0, 0);
-          doc.text(sanitizePdfText(line.trim().toUpperCase()), margin, cursorY);
-          doc.setFont("courier", "normal");
-          doc.setTextColor(0, 0, 0);
-          cursorY += songLineH;
-          return;
-        }
-
-        // Render line with highlighted chords
-        const parts = line.split(/\[(.*?)\]/g);
-        let currentX = margin;
-        doc.setFontSize(11);
-        
-        parts.forEach((part, i) => {
-          const isChord = i % 2 === 1;
-          if (isChord) {
-            doc.setFont("courier", "bold");
-            doc.setTextColor(0, 153, 184); // Cyan
-          } else {
-            doc.setFont("courier", "normal");
-            doc.setTextColor(0, 0, 0); // Black
-          }
-          
-          const textToRender = sanitizePdfText(part);
-          if (textToRender) {
-            doc.text(textToRender, currentX, cursorY);
-            currentX += doc.getTextWidth(textToRender);
-          }
-        });
-
-        cursorY += songLineH;
-      });
-
-      if (song.notes?.trim()) {
-        cursorY += 5;
-        if (cursorY > pageHeight - margin - 15) cursorY = newPage();
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(8);
-        doc.setTextColor(130, 130, 130);
-        doc.text('NOTES', margin, cursorY);
-        cursorY += 4;
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(8);
-        doc.splitTextToSize(song.notes, contentWidth).forEach((nl: string) => {
-          if (cursorY > pageHeight - margin) cursorY = newPage();
-          doc.text(nl, margin, cursorY);
-          cursorY += 4.5;
-        });
-      }
-      
-      cursorY += 15;
-    });
-
+    const layoutDoc = currentSetlist.layout_document ?? buildInitialDocument(setlistItems);
+    const doc = exportLayoutDocumentToPdf(layoutDoc, setlistItems, pdfTitle);
     doc.save(`${pdfTitle}.pdf`);
   };
 
