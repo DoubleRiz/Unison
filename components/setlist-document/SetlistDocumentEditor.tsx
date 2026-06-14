@@ -171,7 +171,7 @@ export const SetlistDocumentEditor: React.FC<SetlistDocumentEditorProps> = ({
             </p>
           )}
           <div
-            className="mx-auto bg-white text-slate-900 shadow-2xl rounded-sm prose"
+            className="mx-auto bg-white text-slate-900 shadow-2xl rounded-sm"
             style={{ width: '210mm', minHeight: '297mm', padding: '20mm', maxWidth: '100%' }}
           >
             <EditorContent editor={editor} />
