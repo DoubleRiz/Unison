@@ -1,11 +1,11 @@
 import React, { useContext } from 'react';
 import { NodeViewWrapper, NodeViewProps } from '@tiptap/react';
-import { GripVertical, Lock, Minus, Plus, X } from 'lucide-react';
+import { GripVertical, Lock, Minus, Plus, X, ChevronUp, ChevronDown } from 'lucide-react';
 import { SongLookupContext } from './SongLookupContext';
 import { SongBlockActionsContext } from './SongBlockActionsContext';
 import { SongBlockAttrs } from '../../types';
 
-export const SongBlockView: React.FC<NodeViewProps> = ({ node, updateAttributes }) => {
+export const SongBlockView: React.FC<NodeViewProps> = ({ node, updateAttributes, getPos, editor }) => {
   const songLookup = useContext(SongLookupContext);
   const actions = useContext(SongBlockActionsContext);
   const { setlistSongId, songId, transpose } = node.attrs as SongBlockAttrs;
@@ -15,6 +15,32 @@ export const SongBlockView: React.FC<NodeViewProps> = ({ node, updateAttributes 
     const newTranspose = transpose + delta;
     updateAttributes({ transpose: newTranspose });
     actions.onTransposeChange(setlistSongId, newTranspose);
+  };
+
+  const moveBy = (offset: number) => {
+    const pos = getPos();
+    const $pos = editor.state.doc.resolve(pos);
+    const parent = $pos.parent;
+    const parentStart = $pos.start($pos.depth);
+    let targetIndex = $pos.index($pos.depth) + offset;
+
+    while (targetIndex >= 0 && targetIndex < parent.childCount && parent.child(targetIndex).type.name !== 'songBlock') {
+      targetIndex += offset;
+    }
+    if (targetIndex < 0 || targetIndex >= parent.childCount) return;
+
+    const targetNode = parent.child(targetIndex);
+    let targetPos = parentStart;
+    for (let i = 0; i < targetIndex; i++) targetPos += parent.child(i).nodeSize;
+
+    editor
+      .chain()
+      .command(({ tr }) => {
+        tr.setNodeMarkup(pos, undefined, targetNode.attrs);
+        tr.setNodeMarkup(targetPos, undefined, node.attrs);
+        return true;
+      })
+      .run();
   };
 
   if (!song) {
@@ -33,9 +59,17 @@ export const SongBlockView: React.FC<NodeViewProps> = ({ node, updateAttributes 
       className="my-2 flex items-center gap-3 p-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
       contentEditable={false}
     >
-      <span data-drag-handle className="cursor-grab text-slate-400 dark:text-slate-500 shrink-0">
+      <span data-drag-handle className="hidden lg:block cursor-grab text-slate-400 dark:text-slate-500 shrink-0">
         <GripVertical size={16} />
       </span>
+      <div className="flex lg:hidden flex-col shrink-0">
+        <button type="button" onClick={() => moveBy(-1)} className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+          <ChevronUp size={14} />
+        </button>
+        <button type="button" onClick={() => moveBy(1)} className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+          <ChevronDown size={14} />
+        </button>
+      </div>
       <Lock size={14} className="text-slate-400 dark:text-slate-500 shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="font-bold truncate">{song.title}</div>
