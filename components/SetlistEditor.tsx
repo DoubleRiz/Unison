@@ -31,6 +31,7 @@ import {
 import { jsPDF } from 'jspdf';
 import SongSheet from './SongSheet';
 import SongEditor from './SongEditor';
+import { SetlistDocumentEditor } from './setlist-document/SetlistDocumentEditor';
 import { transposeContent, transpose, getSectionType } from '../utils/musicLogic';
 import { TEXT_COLORS, TEXT_SIZES } from '../constants/textNoteStyles';
 
@@ -157,6 +158,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   const [performanceEditingSong, setPerformanceEditingSong] = useState<Song | null>(null);
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfTitle, setPdfTitle] = useState('');
+  const [setlistView, setSetlistView] = useState<'list' | 'document'>('list');
 
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
@@ -350,6 +352,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     setCurrentSetlist(setlist);
     fetchSetlistItems(setlist.id);
     setPerformanceMode(false);
+    setSetlistView('list');
   };
 
   useEffect(() => {
@@ -1044,6 +1047,23 @@ const isVirtual = currentSetlist?.id === FAVORITES_ID;
             </span>
           )}
         </div>
+
+        {!isVirtual && (
+          <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-1 shrink-0">
+            <button
+              onClick={() => setSetlistView('list')}
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${setlistView === 'list' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              Liste
+            </button>
+            <button
+              onClick={() => setSetlistView('document')}
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${setlistView === 'document' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              Document
+            </button>
+          </div>
+        )}
       </div>
       <div className="flex flex-wrap gap-2 sm:gap-3 w-full sm:w-auto">
         <button
@@ -1096,6 +1116,7 @@ const isVirtual = currentSetlist?.id === FAVORITES_ID;
       </div>
     </div>
 
+    {setlistView === 'list' || isVirtual ? (
     <div className="flex-1 flex flex-col lg:flex-row gap-6 lg:gap-8 overflow-visible lg:overflow-hidden pb-10">
       <div className="w-full lg:w-7/12 flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden min-h-[400px]">
         <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
@@ -1274,6 +1295,18 @@ const isVirtual = currentSetlist?.id === FAVORITES_ID;
         </div>
       )}
     </div>
+    ) : (
+      <SetlistDocumentEditor
+        setlist={currentSetlist}
+        setlistItems={setlistItems}
+        allSongs={allSongs}
+        onSongOrderChange={handleDocumentSongOrderChange}
+        onSongRemoved={removeItemFromSetlist}
+        onSongTransposeChange={updateItemTranspose}
+        onSongInserted={handleDocumentSongInserted}
+        onLayoutDocumentChange={handleLayoutDocumentChange}
+      />
+    )}
   </div>
 );
 };

@@ -62,6 +62,7 @@ export const SetlistDocumentEditor: React.FC<SetlistDocumentEditorProps> = ({
 
   const prevSongBlockIds = useRef<string[]>([]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingDoc = useRef<TiptapDoc | null>(null);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const initialContent = useMemo(() => buildInitialContent(setlist, setlistItems), [setlist.id]);
@@ -85,18 +86,28 @@ export const SetlistDocumentEditor: React.FC<SetlistDocumentEditorProps> = ({
   }, [setlist.id]);
 
   useEffect(() => () => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      if (pendingDoc.current) saveDocument(pendingDoc.current);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const saveDocument = async (doc: TiptapDoc) => {
+    const { error } = await supabase.from('setlists').update({ layout_document: doc }).eq('id', setlist.id);
+    if (error) {
+      console.error('Failed to save layout document:', error);
+      return;
+    }
+    onLayoutDocumentChange(doc);
+  };
 
   const persistDocument = (doc: TiptapDoc) => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      const { error } = await supabase.from('setlists').update({ layout_document: doc }).eq('id', setlist.id);
-      if (error) {
-        console.error('Failed to save layout document:', error);
-        return;
-      }
-      onLayoutDocumentChange(doc);
+    pendingDoc.current = doc;
+    saveTimer.current = setTimeout(() => {
+      pendingDoc.current = null;
+      saveDocument(doc);
     }, 1500);
   };
 
