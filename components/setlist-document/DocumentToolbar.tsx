@@ -38,7 +38,7 @@ const Divider: React.FC = () => <div className="w-px h-6 bg-slate-700 mx-1" />;
 
 export const DocumentToolbar: React.FC<DocumentToolbarProps> = ({ editor, onInsertSong }) => {
   return (
-    <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1 bg-slate-900 border border-slate-800 rounded-lg p-2 mb-4 overflow-x-auto">
+    <div className="sticky top-0 z-10 flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-lg p-2 mb-4 overflow-x-auto flex-nowrap lg:flex-wrap">
       <ToolbarButton label="Gras" active={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()}>
         <Bold size={16} />
       </ToolbarButton>
