@@ -1,7 +1,8 @@
 import { jsPDF } from 'jspdf';
-import { Song, TiptapNode } from '../types';
+import { Song, SetlistTextNote, TiptapNode } from '../types';
 import { transposeContent, transpose, getSectionType } from './musicLogic';
 import { flattenParagraphRuns, tokenizeRuns, wrapTokensToLines, TextToken } from './setlistDocumentText';
+import { TEXT_COLORS, TEXT_SIZES } from '../constants/textNoteStyles';
 
 export interface PdfContext {
   doc: jsPDF;
@@ -110,6 +111,29 @@ export const renderSongToPdf = (ctx: PdfContext, song: Song, transposeSemitones:
       ctx.cursorY += 4.5;
     });
   }
+};
+
+export const renderTextNoteToPdf = (ctx: PdfContext, note: SetlistTextNote): void => {
+  const { doc, margin, contentWidth, pageHeight } = ctx;
+  const color = TEXT_COLORS[note.color] || TEXT_COLORS.default;
+  const size = TEXT_SIZES[note.size] || TEXT_SIZES.md;
+
+  doc.setFontSize(size.pdfFontSize);
+  doc.setTextColor(color.pdfRgb[0], color.pdfRgb[1], color.pdfRgb[2]);
+  doc.setFont('helvetica', 'bold');
+
+  const lines = doc.splitTextToSize(sanitizePdfText(note.content), contentWidth);
+  const textHeightTotal = lines.length * size.pdfLineSpacing;
+
+  if (ctx.cursorY + textHeightTotal > pageHeight - margin) startNewPage(ctx);
+
+  lines.forEach((line: string) => {
+    if (ctx.cursorY > pageHeight - margin) startNewPage(ctx);
+    doc.text(line, margin, ctx.cursorY);
+    ctx.cursorY += size.pdfLineSpacing;
+  });
+
+  ctx.cursorY += 10;
 };
 
 const FONT_SIZE_NORMAL = 11;

@@ -44,6 +44,7 @@ export interface Setlist {
   group_id?: string | null;
   title: string;
   created_at: string;
+  mode: 'list' | 'document';
   text_notes?: SetlistTextNote[];
   layout_document?: TiptapDoc | null;
   songs?: Song[]; // Optional, used for UI display only

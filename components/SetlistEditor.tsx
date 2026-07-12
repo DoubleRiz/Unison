@@ -34,6 +34,7 @@ import { SetlistDocumentEditor } from './setlist-document/SetlistDocumentEditor'
 import { TEXT_COLORS, TEXT_SIZES } from '../constants/textNoteStyles';
 import { buildInitialDocument } from '../utils/setlistDocument';
 import { exportLayoutDocumentToPdf } from '../utils/setlistDocumentPdf';
+import { exportSetlistListToPdf } from '../utils/setlistListPdf';
 
 const FAVORITES_ID = 'virtual_favorites';
 
@@ -83,9 +84,11 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   const [setlists, setSetlists] = useState<Setlist[]>([]);
   const [currentSetlist, setCurrentSetlist] = useState<Setlist | null>(null);
   const [setlistItems, setSetlistItems] = useState<SetlistItem[]>([]);
+  const [setlistItemsLoadedFor, setSetlistItemsLoadedFor] = useState<string | null>(null);
 
   const [newTitle, setNewTitle] = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
+  const [newSetlistMode, setNewSetlistMode] = useState<'list' | 'document'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -158,7 +161,6 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   const [performanceEditingSong, setPerformanceEditingSong] = useState<Song | null>(null);
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfTitle, setPdfTitle] = useState('');
-  const [setlistView, setSetlistView] = useState<'list' | 'document'>('list');
 
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
@@ -194,6 +196,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
           transpose: 0
         }));
       setSetlistItems(favorites);
+      setSetlistItemsLoadedFor(setlistId);
       return;
     }
 
@@ -232,6 +235,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
 
       setSetlistItems(merged);
     }
+    setSetlistItemsLoadedFor(setlistId);
   };
 
   // ── Text notes persistence ───────────────────────────────────────────────
@@ -252,13 +256,14 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   const handleCreateSetlist = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
-    const payload: any = { title: newTitle, user_id: user.id };
+    const payload: any = { title: newTitle, user_id: user.id, mode: newSetlistMode };
     if (selectedGroupId) payload.group_id = selectedGroupId;
     const { data, error } = await supabase.from('setlists').insert([payload]).select().single();
     if (!error && data) {
       setSetlists([data, ...setlists]);
       setNewTitle('');
       setSelectedGroupId('');
+      setNewSetlistMode('list');
       handleSelectSetlist(data);
     }
   };
@@ -300,26 +305,51 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
         title: `${original.title} (copie)`,
         user_id: user.id,
         group_id: original.group_id ?? null,
-        text_notes: original.text_notes || [],
+        mode: original.mode,
+        text_notes: original.mode === 'list' ? (original.text_notes || []) : [],
+        layout_document: null, // patched below once setlist_songs are duplicated, if mode === 'document'
       }])
       .select()
       .single();
 
     if (!error && newSetlist) {
-      const { data: songs } = await supabase
+      const { data: originalSongs } = await supabase
         .from('setlist_songs')
-        .select('song_id, position, transpose')
-        .eq('setlist_id', original.id);
+        .select('id, song_id, position, transpose')
+        .eq('setlist_id', original.id)
+        .order('position', { ascending: true });
 
-      if (songs && songs.length > 0) {
-        await supabase.from('setlist_songs').insert(
-          songs.map(s => ({
-            setlist_id: newSetlist.id,
-            song_id: s.song_id,
-            position: s.position,
-            transpose: s.transpose,
-          }))
+      let idMap = new Map<string, string>();
+      if (originalSongs && originalSongs.length > 0) {
+        const { data: insertedSongs } = await supabase
+          .from('setlist_songs')
+          .insert(
+            originalSongs.map(s => ({
+              setlist_id: newSetlist.id,
+              song_id: s.song_id,
+              position: s.position,
+              transpose: s.transpose,
+            }))
+          )
+          .select('id, song_id, position, transpose')
+          .order('position', { ascending: true });
+
+        idMap = new Map(
+          originalSongs.map((s, index) => [s.id, insertedSongs?.[index]?.id]).filter(([, v]) => v) as [string, string][]
         );
+      }
+
+      if (original.mode === 'document' && original.layout_document) {
+        const remapped: TiptapDoc = {
+          ...original.layout_document,
+          content: original.layout_document.content.map((node) =>
+            node.type === 'songBlock'
+              ? { ...node, attrs: { ...node.attrs, setlistSongId: idMap.get(node.attrs?.setlistSongId as string) ?? node.attrs?.setlistSongId } }
+              : node
+          ),
+        };
+        await supabase.from('setlists').update({ layout_document: remapped }).eq('id', newSetlist.id);
+        newSetlist.layout_document = remapped;
       }
 
       setSetlists([newSetlist, ...setlists]);
@@ -350,9 +380,9 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
 
   const handleSelectSetlist = (setlist: Setlist) => {
     setCurrentSetlist(setlist);
+    setSetlistItemsLoadedFor(null);
     fetchSetlistItems(setlist.id);
     setPerformanceMode(false);
-    setSetlistView('list');
   };
 
   useEffect(() => {
@@ -501,8 +531,9 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     if (!currentSetlist || setlistItems.length === 0) return;
     setShowPdfModal(false);
 
-    const layoutDoc = currentSetlist.layout_document ?? buildInitialDocument(setlistItems);
-    const doc = exportLayoutDocumentToPdf(layoutDoc, setlistItems, pdfTitle);
+    const doc = currentSetlist.mode === 'document'
+      ? exportLayoutDocumentToPdf(currentSetlist.layout_document ?? buildInitialDocument(setlistItems), setlistItems, pdfTitle)
+      : exportSetlistListToPdf(setlistItems, pdfTitle);
     doc.save(`${pdfTitle}.pdf`);
   };
 
@@ -510,7 +541,8 @@ const favoriteSetlist: Setlist = {
   id: FAVORITES_ID,
   user_id: user.id,
   title: 'My Favorites',
-  created_at: new Date().toISOString()
+  created_at: new Date().toISOString(),
+  mode: 'list'
 };
 
 if (performanceMode && currentSetlist) {
@@ -674,6 +706,22 @@ if (!currentSetlist) {
           <input type="text" placeholder="Gig at The Pub..." value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 sm:py-2 text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-500" />
+          <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setNewSetlistMode('list')}
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${newSetlistMode === 'list' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              Liste
+            </button>
+            <button
+              type="button"
+              onClick={() => setNewSetlistMode('document')}
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${newSetlistMode === 'document' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              Document
+            </button>
+          </div>
           {groups.length > 0 && (
             <div className="flex-1 sm:flex-none sm:w-48">
               <select value={selectedGroupId} onChange={(e) => setSelectedGroupId(e.target.value)}
@@ -907,22 +955,6 @@ const isVirtual = currentSetlist?.id === FAVORITES_ID;
           )}
         </div>
 
-        {!isVirtual && (
-          <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-1 shrink-0">
-            <button
-              onClick={() => setSetlistView('list')}
-              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${setlistView === 'list' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'}`}
-            >
-              Liste
-            </button>
-            <button
-              onClick={() => setSetlistView('document')}
-              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${setlistView === 'document' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'}`}
-            >
-              Document
-            </button>
-          </div>
-        )}
       </div>
       <div className="flex flex-wrap gap-2 sm:gap-3 w-full sm:w-auto">
         <button
@@ -975,7 +1007,7 @@ const isVirtual = currentSetlist?.id === FAVORITES_ID;
       </div>
     </div>
 
-    {setlistView === 'list' || isVirtual ? (
+    {currentSetlist.mode === 'list' || isVirtual ? (
     <div className="flex-1 flex flex-col lg:flex-row gap-6 lg:gap-8 overflow-visible lg:overflow-hidden pb-10">
       <div className="w-full lg:w-7/12 flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden min-h-[400px]">
         <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
@@ -1154,7 +1186,7 @@ const isVirtual = currentSetlist?.id === FAVORITES_ID;
         </div>
       )}
     </div>
-    ) : (
+    ) : setlistItemsLoadedFor === currentSetlist.id ? (
       <SetlistDocumentEditor
         key={currentSetlist.id}
         setlist={currentSetlist}
@@ -1166,6 +1198,10 @@ const isVirtual = currentSetlist?.id === FAVORITES_ID;
         onSongInserted={handleDocumentSongInserted}
         onLayoutDocumentChange={handleLayoutDocumentChange}
       />
+    ) : (
+      <div className="flex-1 flex items-center justify-center text-slate-500 text-sm py-20">
+        Chargement du document...
+      </div>
     )}
   </div>
 );
