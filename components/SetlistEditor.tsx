@@ -34,6 +34,7 @@ import { SetlistDocumentEditor } from './setlist-document/SetlistDocumentEditor'
 import { TEXT_COLORS, TEXT_SIZES } from '../constants/textNoteStyles';
 import { buildInitialDocument } from '../utils/setlistDocument';
 import { exportLayoutDocumentToPdf } from '../utils/setlistDocumentPdf';
+import { exportSetlistListToPdf } from '../utils/setlistListPdf';
 
 const FAVORITES_ID = 'virtual_favorites';
 
@@ -501,8 +502,9 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
     if (!currentSetlist || setlistItems.length === 0) return;
     setShowPdfModal(false);
 
-    const layoutDoc = currentSetlist.layout_document ?? buildInitialDocument(setlistItems);
-    const doc = exportLayoutDocumentToPdf(layoutDoc, setlistItems, pdfTitle);
+    const doc = currentSetlist.mode === 'document'
+      ? exportLayoutDocumentToPdf(currentSetlist.layout_document ?? buildInitialDocument(setlistItems), setlistItems, pdfTitle)
+      : exportSetlistListToPdf(setlistItems, pdfTitle);
     doc.save(`${pdfTitle}.pdf`);
   };
 
