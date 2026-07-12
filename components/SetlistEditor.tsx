@@ -510,7 +510,8 @@ const favoriteSetlist: Setlist = {
   id: FAVORITES_ID,
   user_id: user.id,
   title: 'My Favorites',
-  created_at: new Date().toISOString()
+  created_at: new Date().toISOString(),
+  mode: 'list'
 };
 
 if (performanceMode && currentSetlist) {
