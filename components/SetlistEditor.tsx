@@ -302,26 +302,51 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
         title: `${original.title} (copie)`,
         user_id: user.id,
         group_id: original.group_id ?? null,
-        text_notes: original.text_notes || [],
+        mode: original.mode,
+        text_notes: original.mode === 'list' ? (original.text_notes || []) : [],
+        layout_document: null, // patched below once setlist_songs are duplicated, if mode === 'document'
       }])
       .select()
       .single();
 
     if (!error && newSetlist) {
-      const { data: songs } = await supabase
+      const { data: originalSongs } = await supabase
         .from('setlist_songs')
-        .select('song_id, position, transpose')
-        .eq('setlist_id', original.id);
+        .select('id, song_id, position, transpose')
+        .eq('setlist_id', original.id)
+        .order('position', { ascending: true });
 
-      if (songs && songs.length > 0) {
-        await supabase.from('setlist_songs').insert(
-          songs.map(s => ({
-            setlist_id: newSetlist.id,
-            song_id: s.song_id,
-            position: s.position,
-            transpose: s.transpose,
-          }))
+      let idMap = new Map<string, string>();
+      if (originalSongs && originalSongs.length > 0) {
+        const { data: insertedSongs } = await supabase
+          .from('setlist_songs')
+          .insert(
+            originalSongs.map(s => ({
+              setlist_id: newSetlist.id,
+              song_id: s.song_id,
+              position: s.position,
+              transpose: s.transpose,
+            }))
+          )
+          .select('id, song_id, position, transpose')
+          .order('position', { ascending: true });
+
+        idMap = new Map(
+          originalSongs.map((s, index) => [s.id, insertedSongs?.[index]?.id]).filter(([, v]) => v) as [string, string][]
         );
+      }
+
+      if (original.mode === 'document' && original.layout_document) {
+        const remapped: TiptapDoc = {
+          ...original.layout_document,
+          content: original.layout_document.content.map((node) =>
+            node.type === 'songBlock'
+              ? { ...node, attrs: { ...node.attrs, setlistSongId: idMap.get(node.attrs?.setlistSongId as string) ?? node.attrs?.setlistSongId } }
+              : node
+          ),
+        };
+        await supabase.from('setlists').update({ layout_document: remapped }).eq('id', newSetlist.id);
+        newSetlist.layout_document = remapped;
       }
 
       setSetlists([newSetlist, ...setlists]);
