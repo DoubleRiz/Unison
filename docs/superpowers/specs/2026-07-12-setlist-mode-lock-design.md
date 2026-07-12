@@ -72,6 +72,33 @@ doc.save(`${pdfTitle}.pdf`);
 
 (Le mode document n'a plus besoin de `buildInitialDocument` en fallback puisque `layout_document` existe toujours dès la création si `mode === 'document'`, initialisé vide.)
 
+## 5. Duplication d'une setlist
+
+`executeDuplicateSetlist` (`SetlistEditor.tsx:288-331`) copie aujourd'hui `title`, `group_id`, `text_notes` et les `setlist_songs`, mais omet `layout_document` — une setlist document dupliquée perd donc silencieusement son contenu (la copie repart avec un document vide/`null`).
+
+Le payload d'insertion est complété pour que la copie hérite du `mode` de l'originale, avec son contenu associé :
+
+```js
+.insert([{
+  title: `${original.title} (copie)`,
+  user_id: user.id,
+  group_id: original.group_id ?? null,
+  mode: original.mode,
+  text_notes: original.mode === 'list' ? (original.text_notes || []) : [],
+  layout_document: original.mode === 'document' ? (original.layout_document ?? null) : null,
+}])
+```
+
+Une setlist document dupliquée reste `document` et copie son `layout_document`, mais **pas verbatim** : les nœuds `songBlock` référencent `setlist_songs.id` via l'attribut `setlistSongId` (`SetlistDocumentEditor.tsx:154`), qui pointerait sinon vers les lignes `setlist_songs` de l'originale.
+
+Aujourd'hui, la duplication des `setlist_songs` (lignes 309-323) ne capture aucune correspondance ancien id → nouvel id (le `select` initial ne remonte que `song_id, position, transpose`, et l'`insert` n'utilise pas `.select()`). Il faut donc modifier cette étape pour :
+1. Sélectionner aussi `id` sur les `setlist_songs` d'origine.
+2. Utiliser `.select()` sur l'insert des nouvelles lignes pour récupérer leurs ids générés.
+3. Construire une map `ancien setlistSongId → nouveau setlistSongId` (par position, puisque l'ordre d'insertion suit celui de la sélection).
+4. Parcourir le `layout_document` copié et réécrire l'attribut `setlistSongId` de chaque nœud `songBlock` via cette map avant de l'insérer dans le payload de la nouvelle setlist.
+
+Une setlist liste dupliquée reste `list` et ne copie que `text_notes`, comme aujourd'hui (pas de `setlistSongId` à remapper, les notes texte n'en contiennent pas).
+
 ## Hors scope
 
 - Pas de conversion/migration d'une setlist `document` existante vers `list` (ou inversement) après cette migration one-shot : le choix est définitif, aucune UI de conversion n'est prévue.
