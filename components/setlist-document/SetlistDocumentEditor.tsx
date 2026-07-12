@@ -149,10 +149,12 @@ export const SetlistDocumentEditor: React.FC<SetlistDocumentEditorProps> = ({
     if (!data || !editor) return;
 
     onSongInserted({ type: 'song', id: data.id, song, transpose: 0 });
+    const endPos = editor.state.doc.content.size;
     editor.chain()
-      .focus()
-      .insertContent({ type: 'songBlock', attrs: { setlistSongId: data.id, songId: song.id, transpose: 0 } })
-      .insertContent({ type: 'paragraph' })
+      .insertContentAt(endPos, [
+        { type: 'songBlock', attrs: { setlistSongId: data.id, songId: song.id, transpose: 0 } },
+        { type: 'paragraph' },
+      ])
       .run();
     setShowSongPicker(false);
     setPickerQuery('');

@@ -84,6 +84,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   const [setlists, setSetlists] = useState<Setlist[]>([]);
   const [currentSetlist, setCurrentSetlist] = useState<Setlist | null>(null);
   const [setlistItems, setSetlistItems] = useState<SetlistItem[]>([]);
+  const [setlistItemsLoadedFor, setSetlistItemsLoadedFor] = useState<string | null>(null);
 
   const [newTitle, setNewTitle] = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
@@ -195,6 +196,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
           transpose: 0
         }));
       setSetlistItems(favorites);
+      setSetlistItemsLoadedFor(setlistId);
       return;
     }
 
@@ -233,6 +235,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
 
       setSetlistItems(merged);
     }
+    setSetlistItemsLoadedFor(setlistId);
   };
 
   // ── Text notes persistence ───────────────────────────────────────────────
@@ -377,6 +380,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
 
   const handleSelectSetlist = (setlist: Setlist) => {
     setCurrentSetlist(setlist);
+    setSetlistItemsLoadedFor(null);
     fetchSetlistItems(setlist.id);
     setPerformanceMode(false);
   };
@@ -1182,7 +1186,7 @@ const isVirtual = currentSetlist?.id === FAVORITES_ID;
         </div>
       )}
     </div>
-    ) : (
+    ) : setlistItemsLoadedFor === currentSetlist.id ? (
       <SetlistDocumentEditor
         key={currentSetlist.id}
         setlist={currentSetlist}
@@ -1194,6 +1198,10 @@ const isVirtual = currentSetlist?.id === FAVORITES_ID;
         onSongInserted={handleDocumentSongInserted}
         onLayoutDocumentChange={handleLayoutDocumentChange}
       />
+    ) : (
+      <div className="flex-1 flex items-center justify-center text-slate-500 text-sm py-20">
+        Chargement du document...
+      </div>
     )}
   </div>
 );
