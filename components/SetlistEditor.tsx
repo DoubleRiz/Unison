@@ -86,6 +86,7 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
 
   const [newTitle, setNewTitle] = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
+  const [newSetlistMode, setNewSetlistMode] = useState<'list' | 'document'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -252,13 +253,14 @@ const SetlistEditor: React.FC<SetlistEditorProps> = ({ user, allSongs, groups, o
   const handleCreateSetlist = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
-    const payload: any = { title: newTitle, user_id: user.id };
+    const payload: any = { title: newTitle, user_id: user.id, mode: newSetlistMode };
     if (selectedGroupId) payload.group_id = selectedGroupId;
     const { data, error } = await supabase.from('setlists').insert([payload]).select().single();
     if (!error && data) {
       setSetlists([data, ...setlists]);
       setNewTitle('');
       setSelectedGroupId('');
+      setNewSetlistMode('list');
       handleSelectSetlist(data);
     }
   };
@@ -675,6 +677,22 @@ if (!currentSetlist) {
           <input type="text" placeholder="Gig at The Pub..." value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 sm:py-2 text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-500" />
+          <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setNewSetlistMode('list')}
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${newSetlistMode === 'list' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              Liste
+            </button>
+            <button
+              type="button"
+              onClick={() => setNewSetlistMode('document')}
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${newSetlistMode === 'document' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              Document
+            </button>
+          </div>
           {groups.length > 0 && (
             <div className="flex-1 sm:flex-none sm:w-48">
               <select value={selectedGroupId} onChange={(e) => setSelectedGroupId(e.target.value)}
