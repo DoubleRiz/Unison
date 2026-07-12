@@ -55,7 +55,7 @@ Les boutons "Liste" / "Document" (`SetlistEditor.tsx:910-925`, rendus `!isVirtua
 - Setlist `mode: 'document'` : comportement actuel inchangé (édition TipTap, ajout de chansons via `songBlock`, autosave).
 - Setlist `mode: 'list'` : ne possède jamais de `layout_document` ; toute la gestion (chansons + notes texte interleaved, `persistTextNotes`) reste inchangée.
 
-`buildInitialDocument` (conversion `text_notes` → doc TipTap initial) devient morte : une setlist en mode document n'a jamais eu de `text_notes` significatifs puisque le mode est fixé dès la création, avant tout ajout de contenu. Elle est supprimée, ainsi que son appel dans `SetlistDocumentEditor.tsx` (remplacé par un document TipTap vide par défaut, ex. `{ type: 'doc', content: [] }`).
+`buildInitialDocument` (`utils/setlistDocument.ts:32-45`) reste inchangée et continue d'être utilisée par `SetlistDocumentEditor.tsx` (`buildInitialContent`, ligne 37-47) pour générer le document TipTap initial la première fois qu'une setlist `document` est ouverte. Avec le mode figé, une setlist `document` n'a jamais de `text_notes` ni de chansons avant sa première ouverture (elles ne peuvent être ajoutées que depuis l'éditeur document lui-même) : `buildInitialDocument(setlistItems)` reçoit donc systématiquement un tableau vide et produit un document TipTap ne contenant qu'un paragraphe vide — comportement correct et suffisant, aucun changement requis sur ce fichier.
 
 ## 4. Export PDF selon le mode
 
@@ -65,12 +65,12 @@ Nouveau fichier `utils/setlistListPdf.ts`, exportant `exportSetlistListToPdf(set
 
 ```ts
 const doc = currentSetlist.mode === 'document'
-  ? exportLayoutDocumentToPdf(currentSetlist.layout_document ?? { type: 'doc', content: [] }, setlistItems, pdfTitle)
+  ? exportLayoutDocumentToPdf(currentSetlist.layout_document ?? buildInitialDocument(setlistItems), setlistItems, pdfTitle)
   : exportSetlistListToPdf(setlistItems, pdfTitle);
 doc.save(`${pdfTitle}.pdf`);
 ```
 
-(Le mode document n'a plus besoin de `buildInitialDocument` en fallback puisque `layout_document` existe toujours dès la création si `mode === 'document'`, initialisé vide.)
+(Le fallback `?? buildInitialDocument(setlistItems)` est inchangé par rapport au code actuel — filet de sécurité si le PDF est exporté avant que l'effet de persistance initial de `SetlistDocumentEditor` n'ait eu le temps de s'exécuter.)
 
 ## 5. Duplication d'une setlist
 
